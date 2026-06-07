@@ -32,6 +32,8 @@ const VERSION_FILE = join(APP, 'VERSION');
 const UPDATE_FLAG = join(DATA, '.update-requested');   // dashboard writes; root systemd path applies
 const UPDATE_STATUS = join(DATA, 'update-status.json'); // root updater writes; dashboard reads
 const UPDATE_URL = process.env.DL_UPDATE_URL || 'https://raw.githubusercontent.com/RubiconTwilly/dreamlabs-agent-server/main';
+const GITHUB_TOKEN_FILE = join(DATA, 'github.token'); // 600, dreamlabs-owned. Read by dashboard (repo list) + runner (clone).
+const GITHUB_JSON = join(DATA, 'github.json');        // {connected, login} - no token
 const VERSION = (() => { try { return readFileSync(VERSION_FILE, 'utf8').trim(); } catch { return 'dev'; } })();
 const RUNNER = join(APP, 'bin', 'run-agent.sh');
 const CRON_TAG = 'dreamlabs-agent-server';
@@ -107,6 +109,21 @@ function writeRoutines(obj) {
 function getRoutine(id) { return readRoutines().routines.find(r => r.id === id); }
 function providerStatus() { return readJSON(PROVIDERS_FILE, {}); }
 function updateStatus() { return readJSON(UPDATE_STATUS, null); }
+function githubStatus() { return readJSON(GITHUB_JSON, { connected: false }); }
+function readGithubToken() { try { return readFileSync(GITHUB_TOKEN_FILE, 'utf8').trim(); } catch { return ''; } }
+// Call the GitHub API with the stored token. Returns parsed JSON, {error} on HTTP error, or null if not connected.
+async function gh(path) {
+  const t = readGithubToken();
+  if (!t) return null;
+  try {
+    const r = await fetch('https://api.github.com' + path, {
+      headers: { authorization: 'Bearer ' + t, 'user-agent': 'dreamlabs-agent-server', accept: 'application/vnd.github+json' },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) return { error: r.status };
+    return r.json();
+  } catch { return { error: 'network' }; }
+}
 async function fetchRemoteVersion() {
   try {
     const res = await fetch(UPDATE_URL + '/VERSION', { signal: AbortSignal.timeout(6000) });
@@ -454,7 +471,7 @@ function formPage(r, prefill) {
         <textarea name="instructions" placeholder="Describe what the agent should do in each session">${esc(instr || '')}</textarea>
         <div class="dock">
           <div class="dock-l">
-            <span class="dockicon">⎇ <input name="repo" value="${esc(r.repo || '')}" placeholder="Select a repository" style="background:transparent;border:0;padding:4px 6px;width:170px;font-size:12.5px"></span>
+            <span class="dockicon">⎇ <input name="repo" id="repo" list="repolist" value="${esc(r.repo || '')}" placeholder="Select a repository" autocomplete="off" style="background:transparent;border:0;padding:4px 6px;width:230px;font-size:12.5px"><datalist id="repolist"></datalist></span>
           </div>
           <div class="dock-r">
             <select name="model" title="Model">${modelOpts.map(m => opt(m, r.model, m || 'Default model')).join('')}</select>
@@ -527,6 +544,13 @@ function formPage(r, prefill) {
     function syncModels(p){var s=document.querySelector('select[name=model]');var ms=MODELS[p]||MODELS.claude;
       s.innerHTML=ms.map(function(m){return '<option value="'+m+'">'+(m||'Default model')+'</option>'}).join('');}
     pickTrig('${esc(t.type)}');pickSub('connectors');
+    // Populate the repo picker from the connected GitHub account.
+    fetch('/api/github/repos').then(function(r){return r.json()}).then(function(d){
+      var inp=document.getElementById('repo'), dl=document.getElementById('repolist');
+      if(!d.connected){ inp.placeholder='Connect GitHub to pick a repo'; return; }
+      dl.innerHTML=(d.repos||[]).map(function(x){return '<option value="'+x.full_name+'">'+(x.private?'private':'public')+'</option>'}).join('');
+      inp.placeholder=(d.repos&&d.repos.length)?'Select a repository ('+d.repos.length+')':'No repos found';
+    }).catch(function(){});
   </script>`;
   return layout(isEdit ? 'Edit routine' : 'New routine', body, isEdit ? 'Edit routine' : 'New routine');
 }
@@ -584,6 +608,43 @@ function detailPage(r) {
   return layout(r.name, body, esc(r.name));
 }
 
+// Connect GitHub: paste a fine-grained PAT. Powers the repo picker + private clones.
+function githubPage(opts) {
+  const gs = githubStatus();
+  const err = opts && opts.error;
+  const newTokenUrl = 'https://github.com/settings/personal-access-tokens/new';
+  const connected = gs.connected
+    ? `<div class="card" style="padding:16px 18px"><div class="cred" style="border:0;padding:0">
+         <span>Connected as <b>@${esc(gs.login)}</b></span>
+         <form method="post" action="/github/disconnect"><button class="btn ghost sm">Disconnect</button></form></div></div>`
+    : '';
+  const form = `
+    <div class="card" style="padding:18px">
+      <form class="stack" method="post" action="/github/connect" style="margin-top:0;gap:14px">
+        <label class="field"><span class="lab">Fine-grained access token</span>
+          <span class="hint">Create one at <a href="${newTokenUrl}" target="_blank">github.com/settings/personal-access-tokens</a>. Repository access: the repos your agents will use. Permissions: <b>Contents: Read</b> (and <b>Read-only</b> Metadata, added automatically). Add <b>Webhooks: Read &amp; write</b> only if you want GitHub-event triggers.</span>
+          <input name="token" type="password" placeholder="github_pat_..." autocomplete="off" required></label>
+        ${err ? `<div class="warn">⚠️ <div>${esc(err)}</div></div>` : ''}
+        <div class="row-actions"><button class="btn" type="submit">Connect GitHub</button></div>
+      </form>
+    </div>`;
+  const tut = `
+    <div class="sectlabel">How it works</div>
+    <div class="card" style="padding:16px 18px"><ol style="margin:0 0 0 18px;color:var(--subtle);font-size:13px;line-height:1.8">
+      <li>Connect once here. The token is stored in a 600 file the runner reads to clone your repos.</li>
+      <li>When you create an agent, pick a repo from your GitHub list (the "Select a repository" field).</li>
+      <li>Each run clones/pulls that repo into the agent's own workspace before the agent starts.</li>
+      <li>Private repos work automatically once connected. The token is never shown again or committed.</li>
+    </ol></div>`;
+  const body = `
+    <a class="back" href="/access">< Access &amp; keys</a>
+    <h2 class="title">Connect GitHub</h2>
+    <p class="lede">Let your agents pull code from your repositories, and pick repos from a list when you create an agent.</p>
+    ${connected || form}
+    ${tut}`;
+  return layout('Connect GitHub', body, 'Connect GitHub');
+}
+
 // "See your keys" - STATUS + access link only. Never prints provider secrets.
 async function accessPage() {
   const st = providerStatus();
@@ -615,6 +676,11 @@ async function accessPage() {
       ? '<span class="pill live"><span class="dotmark"></span>connected</span>'
       : '<span class="pill"><span class="dotmark"></span>not configured</span>'}</div>`;
   }).join('');
+  const ghs = githubStatus();
+  const ghRow = `<div class="cred"><span>GitHub${ghs.connected ? ' <span class="tert">(@' + esc(ghs.login) + ')</span>' : ''}</span>
+    ${ghs.connected
+      ? '<a class="btn ghost sm" href="/github">Manage</a>'
+      : '<a class="btn sm" href="/github">Connect</a>'}</div>`;
   const link = (PUBLIC_URL || `http://${HOST}:${PORT}`) + '/?token=' + TOKEN;
   const body = `
   <a class="back" href="/">← All routines</a>
@@ -633,6 +699,10 @@ async function accessPage() {
   <div class="sectlabel">Provider connections</div>
   <div class="card">${provRows}</div>
   <p class="hint" style="margin-top:10px">Add or change a provider key: edit <code>/etc/dreamlabs/secrets.env</code> (chmod 600, never web-served) and run <code>dreamlabs reconfigure</code>, or re-run the installer. The dashboard only ever sees whether a key is present, never its value.</p>
+
+  <div class="sectlabel">Source control</div>
+  <div class="card">${ghRow}</div>
+  <p class="hint" style="margin-top:10px">Connect GitHub so agents can pull their repos and you can pick repos from a list when creating an agent.</p>
 
   <div class="sectlabel">Software</div>
   <div class="card">${softwareBody}</div>
@@ -735,6 +805,14 @@ const server = http.createServer(async (req, res) => {
     if (path === '/') return send(res, 200, pageList());
     if (path === '/new') return send(res, 200, formPage(null, url.searchParams.get('prefill') || ''));
     if (path === '/access') return send(res, 200, await accessPage());
+    if (path === '/github') return send(res, 200, githubPage());
+    // Repo list for the agent form's picker (reads the stored token).
+    if (path === '/api/github/repos') {
+      const repos = await gh('/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member');
+      if (!repos) return json(res, 200, { connected: false, repos: [] });
+      if (repos.error) return json(res, 200, { connected: true, error: repos.error, repos: [] });
+      return json(res, 200, { connected: true, repos: repos.map(r => ({ full_name: r.full_name, clone_url: r.clone_url, private: r.private })) });
+    }
     if (path.startsWith('/edit/')) {
       const r = getRoutine(path.slice('/edit/'.length));
       return r ? send(res, 200, formPage(r)) : send(res, 404, layout('Not found', '<div class="empty">Routine not found</div>'));
@@ -752,6 +830,27 @@ const server = http.createServer(async (req, res) => {
     if (path === '/update') {
       requestUpdate();
       return redirect(res, '/access');
+    }
+    // Connect GitHub: validate the PAT, then store it (600) + the login (no token).
+    if (path === '/github/connect') {
+      const token = (f.token || '').trim();
+      if (!token) return send(res, 200, githubPage({ error: 'Paste a token first.' }));
+      try {
+        const r = await fetch('https://api.github.com/user', {
+          headers: { authorization: 'Bearer ' + token, 'user-agent': 'dreamlabs-agent-server', accept: 'application/vnd.github+json' },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!r.ok) return send(res, 200, githubPage({ error: `GitHub rejected that token (HTTP ${r.status}). Check the token and its repository access.` }));
+        const user = await r.json();
+        writeFileSync(GITHUB_TOKEN_FILE, token, { mode: 0o600 });
+        writeFileSync(GITHUB_JSON, JSON.stringify({ connected: true, login: user.login, connectedAt: nowISO() }, null, 2));
+        return redirect(res, '/github');
+      } catch { return send(res, 200, githubPage({ error: 'Could not reach GitHub. Check this box has network access.' })); }
+    }
+    if (path === '/github/disconnect') {
+      try { if (existsSync(GITHUB_TOKEN_FILE)) writeFileSync(GITHUB_TOKEN_FILE, ''); } catch {}
+      try { writeFileSync(GITHUB_JSON, JSON.stringify({ connected: false }, null, 2)); } catch {}
+      return redirect(res, '/github');
     }
     if (path === '/routine') {
       const data = readRoutines();

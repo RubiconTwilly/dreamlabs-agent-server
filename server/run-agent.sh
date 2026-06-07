@@ -50,6 +50,10 @@ DEFAULT_WS="$DL_APP/workspace"
 mkdir -p "$LOCKDIR" "$OUTDIR" "$WORKSPACES"
 umask 002
 
+# GitHub token: from secrets.env (GITHUB_TOKEN) or the dashboard "Connect GitHub" file.
+# Used only by this runner for clones; never added to the agent-jail allowlist.
+[ -z "${GITHUB_TOKEN:-}" ] && [ -f "$DL_DATA/github.token" ] && GITHUB_TOKEN="$(cat "$DL_DATA/github.token" 2>/dev/null)"
+
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
 TODAY="$(date -u +%Y%m%dT)"
 LOG="$OUTDIR/$TS.log"
@@ -118,6 +122,8 @@ PAUSED="$(jfield '.paused // false')"
 PROV="$(jfield '.provider // empty')"; PROV="${PROV:-${PROVIDER:-claude}}"
 MODEL="$(jfield '.model // ""')"
 REPO_URL="$(jfield '.repo // ""')"
+# The picker stores "owner/name"; accept that as well as a full URL.
+if [ -n "$REPO_URL" ] && [[ "$REPO_URL" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then REPO_URL="https://github.com/$REPO_URL"; fi
 TIMEOUT_MIN="$(jfield '.contract.timeoutMinutes // 20')"
 MAX_FAILS="$(jfield '.contract.maxConsecutiveFailures // 2')"
 MAX_RUNS_DAY="$(jfield '.contract.maxRunsPerDay // 96')"
