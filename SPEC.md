@@ -1,16 +1,12 @@
 # Dream Labs Agent Server - Self-Hosted, Bring-Your-Own-AI Track
 
-**Status: BUILT and working, v0.7.0 (updated 2026-06-07).** This was a build spec; it
-is now a build + handoff doc. Hand it to a dev to tweak design and extend.
+**Status: LIVE, v0.9.2 (updated 2026-06-07).** Build + handoff doc - hand it to a dev to extend.
 
-- **Repo (public, MIT):** https://github.com/RubiconTwilly/dreamlabs-agent-server
-- **Local source:** `/Users/twilly/Desktop/dreamlabs-agent-server/`
-- **Install (one line):** `curl -fsSL https://get.joindreamlabs.com/install.sh | bash`
-  (auto-detects macOS vs Linux; works on a cloud VPS or a local Mac/Linux box)
-- **See the UI with no install (Mac):** `bash preview.sh` then open the printed link.
-- **Verified end-to-end on macOS:** install -> launchd dashboard on localhost ->
-  connect provider by click -> connect GitHub -> pick repo -> create agent ->
-  run (real model output) -> failure logging -> 2-strike auto-pause.
+- **Distribution (LIVE):** **https://get.joindreamlabs.com** - the setup wizard at `/`, the installer at `/install.sh`, and all server files, served by an Apache vhost on the EC2 box (`13.236.39.21`) with Let's Encrypt SSL. **Installs and self-updates pull from here, NOT GitHub.** Redeploy after code changes with `bash deploy.sh` (rsyncs the docroot; does not touch Apache).
+- **Install (one line):** `curl -fsSL https://get.joindreamlabs.com/install.sh | bash` (auto-detects macOS vs Linux; cloud VPS or local Mac/Linux). It auto-opens the dashboard at the end.
+- **Repo (dev source, public, MIT):** https://github.com/RubiconTwilly/dreamlabs-agent-server - this is just version control; at launch move the product repos to a `dreamlabs` GitHub org (do NOT rename the personal account - other things are tied to it). See section 12.
+- **Local source:** `/Users/twilly/Desktop/dreamlabs-agent-server/`. **Preview the UI (Mac, no install):** `bash preview.sh`.
+- **Verified end-to-end on macOS:** install -> launchd dashboard on localhost -> one-click connect a provider (OAuth device flow) -> one-click connect GitHub (OAuth device flow, read+write) -> pick a repo -> create an agent (explicitly choose its AI) -> run (real output) -> auto-pause on repeated failure.
 
 ---
 
@@ -57,18 +53,24 @@ ownership upgrade. Do not gate the core experience behind a server.
 | Loop contracts (timeout, daily cap, auto-pause) | DONE | enforced in the runner, tested |
 | Agent jail (env allowlist; separate user on Linux) | DONE | + DL_NO_SUDO same-user mode for local/Mac |
 | Provider runner, cross-platform | DONE | no flock/GNU-timeout dependency |
-| All-click provider connect (OAuth + key) | DONE | device flow spawned by dashboard, multiple, swap default |
-| GitHub connect (PAT) + repo picker + per-agent clone | DONE | tested against a real account (16 repos) |
+| One-click provider connect (OAuth device flow + key paste) | DONE | each provider has a Connect button (Access page + /providers); multiple providers; swap default; per-agent pick |
+| GitHub connect - ONE-CLICK OAuth (device flow), read+write | DONE | `repo` scope (push for fork/brand-voice). Dream Labs OAuth App client id baked in. Token paste is a fallback. Poll respects GitHub's interval (slow_down fix). |
+| Per-routine AI picker | DONE | explicit "Which AI runs this agent?" field on the create form (Claude/Codex/Grok/Gemini/DeepSeek/API) |
+| Repo picker + per-agent clone | DONE | lists your real repos once GitHub is connected; each routine clones its own repo |
 | Dream Labs template gallery in the create form | DONE | public templates clone with no token |
 | Calendar tab (Google-Calendar month grid) | DONE | day cells, TODAY highlight, high-freq collapse to "x N", month nav |
-| Daily Briefing (run-health insights) | DONE (box side) | computed; shown in dashboard; delivers via Dream Labs relay (section 11) |
+| Daily Briefing (run-health insights) | DONE (box side) | computed; dashboard card; delivers via Dream Labs relay (section 11); DL backend relay = the dev's piece |
 | Self-update ("Update" button + CLI) | DONE | dashboard requests, root task validates + applies |
-| Setup wizard (stepped, branded, sci-fi) | DONE | `wizard/index.html`, generates the install command |
+| Setup wizard | DONE | `wizard/index.html` - paper-clay-blue (matches app.joindreamlabs.com), real logo + favicons, Skip-provider option, generates the install command |
+| Live hosting on get.joindreamlabs.com | DONE | Apache vhost + SSL on the EC2 box; `deploy.sh` redeploys the docroot |
+| Dashboard themes | DONE | Classic (warm-dark) + Dream Labs (navy) switcher in the header |
 | Audit | DONE | `AUDIT.md` (fixed F1, F2, B1-B4; known limits listed) |
 
-Queue (not yet built): Calendar month-grid with x-N collapse; installer OAuth
-run-inline; DL-hosted-templates + fork-and-upload skeleton; Daily Briefing
-insights agent; wizard provisioning a Dream Labs backend key. See section 9.
+Queue (not yet built): the DL backend relay endpoint + bot for the Daily Briefing
+(section 11); the DL-hosted-templates "fork + upload my files" skeleton; the GitHub
+App per-repo-per-run tier (optional upgrade beyond the OAuth device flow); the
+wizard provisioning a Dream Labs backend key; AI-narrative enrichment for the
+briefing. See section 9.
 
 ---
 
@@ -114,21 +116,26 @@ Customer box (Ubuntu VPS or macOS, localhost)
 
 ## 4. The all-click model
 
-- **Bash installs the platform + connects the FIRST provider** via the installer's
-  prompter (provider choice + auth; OAuth or paste key). That is the only terminal
-  step.
-- **Everything else is click in the dashboard:**
-  - **AI providers** (`/providers`, `/provider/:id`): Connect any provider. OAuth =
-    the dashboard spawns the CLI device flow, captures the approval URL + code,
-    shows it, and auto-detects completion. The user only approves in a browser.
-    Paste-key is also offered. Connect multiple; set/swap the default; pick per
-    agent in the form.
-  - **GitHub** (`/github`): paste a fine-grained PAT (validated, stored 600). Then
-    the create form's "Select a repository" lists the user's real repos, and each
-    agent clones only its own repo (token never enters the agent jail).
-  - **Templates:** the create form leads with Dream Labs template cards (public
-    repos) that fill the repo + a starting prompt + a name. Or use your own repo.
-  - **Self-update** (`/access`): an Update button.
+- **Bash installs the platform + (optionally) the FIRST provider** via the installer's
+  prompter, OR pick **Skip** to stand up just the dashboard and connect everything by
+  click. That bash line is the only terminal step.
+- **Everything else is click in the dashboard. Access & keys has a Connect button per provider + GitHub:**
+  - **AI providers** (`/providers`, `/provider/:id`, and a Connect button on every row of `/access`):
+    Connect any provider. **OAuth = one click**: the dashboard spawns the CLI device flow,
+    captures the approval URL + code, shows it, polls (respecting the interval), and
+    connects itself once you approve in a browser. **Paste-key** is offered for providers
+    without OAuth (DeepSeek, Raw API, or any). Connect multiple; set/swap the default;
+    each routine picks its own provider in the create form ("Which AI runs this agent?").
+  - **GitHub** (`/github`): **ONE-CLICK OAuth device flow** - click Connect GitHub, enter the
+    shown code at github.com/login/device, approve. Grants `repo` scope = **read + write**
+    (so agents can push for the fork / brand-voice flow). Uses the Dream Labs OAuth App
+    (public client id `Ov23lix1uyXcoGe6MsFi`, baked as the default; override with
+    `DL_GITHUB_CLIENT_ID`). The token is stored 600, never enters the agent jail, never shown.
+    A pre-filled `repo`-scope token paste is the fallback. Then the create form's repo
+    picker lists your real repos and each agent clones only its own.
+  - **Templates:** the create form leads with Dream Labs template cards (public repos)
+    that fill the repo + a starting prompt + a name. Or use your own repo.
+  - **Self-update** (`/access`): an Update button. **Theme switcher** (Classic / Dream Labs) in the header.
 
 ---
 
@@ -236,25 +243,28 @@ Confirmed with the owner 2026-06-07:
 
 ---
 
-## 9. Queue / roadmap (the "design things to tweak" + next builds)
+## 9. Queue / roadmap (what's left)
 
-1. ~~Calendar Google-Calendar month grid.~~ **DONE (v0.8.0)** - month grid, TODAY
-   highlight, high-freq collapse to "x N", month nav. (Week-view toggle is a nice
-   future add; design B from the team explorations is ready for it.)
-2. **Installer OAuth run-inline.** The first-provider sign-in should run smoothly
-   inside the bash prompter (device flow), not just print a command.
-3. **DL-hosted templates + fork-and-upload skeleton.** One-click "Fork this template
-   to my GitHub" (GitHub API) + a small brand-voice/business uploader to the fork.
-4. ~~Daily Briefing insights.~~ **DONE box-side (v0.9.0)** - computed insights,
-   dashboard card, daily schedule, delivered via the Dream Labs relay (section 11).
-   Remaining: the DL backend relay endpoint + bot (the dev's piece) and optional
-   AI-narrative enrichment.
-5. **GitHub App tier** (power option): one-click manifest -> user's own App ->
-   short-lived per-repo-per-run installation tokens + native webhook triggers.
-6. **Wizard provisions a Dream Labs backend key** (eventual): the wizard URL becomes
-   a logged-in portal that also mints the customer's Dream Labs key.
-7. **Provider connect UI polish:** a real status (connected/verified) check; a
-   "Connect provider" surface mirroring the GitHub one (mostly done).
+Done since the first cut (no longer queue): Calendar month grid (v0.8.0), Daily
+Briefing box-side (v0.9.0), get.joindreamlabs.com hosting + SSL (v0.9.2), wizard
+paper-clay-blue theme + logo + Skip-provider, one-click GitHub OAuth (read+write),
+per-provider Connect buttons, clearer per-routine AI picker.
+
+Remaining:
+1. **DL backend relay for the Daily Briefing** (the dev's piece): the endpoint + the
+   Dream Labs Telegram bot + the box-to-owner chat mapping. Box side is done; contract in section 11.
+2. **DL-hosted templates + "fork + upload my files" skeleton.** One-click "Fork this
+   template to my GitHub" (now possible - GitHub write is connected) + a small
+   brand-voice/business uploader to the fork. (Owner's model: DL hosts standard
+   templates, users fork + upload their files; box pulls.)
+3. **GitHub App tier** (optional upgrade beyond the OAuth device flow): per-repo-per-run
+   short-lived installation tokens + native webhook triggers.
+4. **Wizard provisions a Dream Labs backend key** (eventual): the wizard URL becomes a
+   logged-in portal that also mints the customer's DL key (feeds DL_BRIEFING_KEY etc.).
+5. **Installer first-provider OAuth run-inline** (minor): run the device login inside the
+   bash prompter rather than printing the command. (Post-install, the dashboard one-click covers it.)
+6. **AI-narrative enrichment** for the briefing (use the box's provider via the jailed runner).
+7. **Move repos to a `dreamlabs` GitHub org** at launch (section 12).
 
 ---
 
@@ -310,5 +320,33 @@ runner (uses the customer's key, stays out of the web process).
 
 **Env vars the wizard sets (no secrets):** `DL_PROVIDER`, `DL_AUTH`, `DL_MODEL`,
 `DL_ACCESS`. Plus install-time: `DL_SOURCE`, `DL_UPDATE_URL`, `DL_KEY` (headless).
+
+---
+
+## 12. Hosting, deploy, and GitHub ownership
+
+**Live host - get.joindreamlabs.com (on the EC2 box `13.236.39.21`, Apache):**
+- Apache vhost `get-joindreamlabs.conf` (+ `-le-ssl.conf`), docroot `/var/www/get-dreamlabs/`.
+  Serves the wizard (`/` = index.html), `install.sh`, `install-macos.sh`, `server/*`,
+  `VERSION`, `workspace-seed/*`, and the logo/favicons. SSL via `certbot --apache`
+  (NEVER nginx - same box runs app.joindreamlabs.com / hub / rubiconbot; the Apache-only
+  rule from DREAMLABS-HANDOFF applies).
+- **Installs + self-updates fetch from here** (the installers' `REPO_RAW` / `DL_UPDATE_URL`
+  default to `https://get.joindreamlabs.com`), not GitHub.
+- **Redeploy after code changes:** `bash deploy.sh` from the local repo - rsyncs the docroot,
+  chowns www-data, does NOT touch Apache config. (`DL_DEPLOY_HOST` / `DL_DEPLOY_KEY` override
+  the box/key; defaults are the EC2 box + `~/.ssh/id_ed25519`.)
+
+**GitHub (dev source + the one-click OAuth App):**
+- Dev source repo: `github.com/RubiconTwilly/dreamlabs-agent-server` (version control only).
+- One-click GitHub connect uses a Dream Labs **OAuth App** (Device Flow enabled, public client
+  id `Ov23lix1uyXcoGe6MsFi`, baked as the default in `dashboard.mjs`). It is public/safe to
+  embed; rotate or override per box with `DL_GITHUB_CLIENT_ID`.
+- **At launch:** create a `dreamlabs` GitHub **org** and transfer the product repos
+  (`dreamlabs-agent-server`, `dreamlabs-agent-starter`, `dreamlabsblueprint`) into it.
+  **Do NOT rename the personal `RubiconTwilly` account** - other services are tied to it.
+  Move the OAuth App to the org too (same client id -> one-click keeps working). Then sweep
+  the ~6 `RubiconTwilly` references (install.sh `STARTER_DEFAULT`, dashboard.mjs `TEMPLATES`,
+  preview.sh samples, SPEC.md) + the git remote, and `bash deploy.sh`.
 
 *End of doc. Pairs with `DREAMLABS-HANDOFF.md` (Track A, the cloud funnel).*
