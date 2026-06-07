@@ -83,6 +83,7 @@ fetch server/run-agent.sh   "$DL_APP/bin/run-agent.sh"
 fetch server/agent-jail.sh  "$DL_APP/bin/agent-jail.sh"
 fetch server/api-call.mjs   "$DL_APP/bin/api-call.mjs"
 fetch server/dashboard.mjs  "$DL_APP/bin/dashboard.mjs"
+fetch server/briefing.mjs   "$DL_APP/bin/briefing.mjs"
 fetch server/update-self.sh "$DL_APP/bin/update-self.sh"
 fetch VERSION               "$DL_APP/VERSION"
 chmod +x "$DL_APP/bin/"*.sh
@@ -201,6 +202,9 @@ DL_AGENT_HOME=$AGENT_HOME
 DL_SVC_USER=$SVC_USER
 ALERT_TG_TOKEN=
 ALERT_TG_CHAT=
+DL_BRIEFING_URL=${DL_BRIEFING_URL:-}
+DL_BRIEFING_KEY=${DL_BRIEFING_KEY:-}
+DL_BOX_ID=${DL_BOX_ID:-}
 EOF
 chown root:"$SVC_USER" "$DL_SECRETS"; chmod 640 "$DL_SECRETS"
 chown root:"$SVC_USER" "$DL_SECRETS_DIR"; chmod 750 "$DL_SECRETS_DIR"
@@ -226,6 +230,11 @@ cat > /etc/sudoers.d/dreamlabs <<EOF
 $SVC_USER ALL=($AGENT_USER) NOPASSWD: /usr/bin/env
 EOF
 chmod 440 /etc/sudoers.d/dreamlabs
+# Daily Briefing at 8am via cron.d (separate from the dashboard-managed crontab so it survives rewrites)
+cat > /etc/cron.d/dreamlabs-briefing <<EOF
+0 8 * * * $SVC_USER /usr/bin/node $DL_APP/bin/briefing.mjs >/dev/null 2>&1
+EOF
+chmod 644 /etc/cron.d/dreamlabs-briefing
 chown -R "$SVC_USER":dlws "$DL_DATA";            chmod -R 2770 "$DL_DATA"
 chown -R "$SVC_USER":dlws "$DL_APP/workspace";   chmod -R 2770 "$DL_APP/workspace"
 ok "least-privilege wiring done"
@@ -285,6 +294,7 @@ case "\${1:-}" in
   logs)        journalctl -u dreamlabs-dashboard -n 50 --no-pager ;;
   update)      systemctl start dreamlabs-update.service; echo "update started - dreamlabs logs-update" ;;
   logs-update) journalctl -u dreamlabs-update.service -n 50 --no-pager ;;
+  briefing)    sudo -u $SVC_USER /usr/bin/node $DL_APP/bin/briefing.mjs ;;
   run)         sudo -u $SVC_USER $DL_APP/bin/run-agent.sh "\$2" manual ;;
   reconfigure) systemctl restart dreamlabs-dashboard; echo "reloaded secrets" ;;
   *) echo "usage: dreamlabs {link|url|restart|logs|update|logs-update|run <id>|reconfigure}" ;;

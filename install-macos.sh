@@ -44,7 +44,8 @@ if [ "${1:-}" = "uninstall" ]; then
   say "Uninstalling"
   launchctl bootout "$DOMAIN/$LABEL_DASH" 2>/dev/null || true
   launchctl bootout "$DOMAIN/$LABEL_UPD" 2>/dev/null || true
-  rm -f "$PLIST_DASH" "$PLIST_UPD"
+  launchctl bootout "$DOMAIN/com.dreamlabs.briefing" 2>/dev/null || true
+  rm -f "$PLIST_DASH" "$PLIST_UPD" "$LA/com.dreamlabs.briefing.plist"
   # remove our managed crontab block
   if crontab -l 2>/dev/null | grep -q 'dreamlabs-agent-server'; then
     crontab -l 2>/dev/null | awk '/# BEGIN dreamlabs-agent-server/{s=1} !s{print} /# END dreamlabs-agent-server/{s=0}' | crontab - || true
@@ -71,6 +72,7 @@ fetch server/run-agent.sh   "$BIN/run-agent.sh"
 fetch server/agent-jail.sh  "$BIN/agent-jail.sh"
 fetch server/api-call.mjs   "$BIN/api-call.mjs"
 fetch server/dashboard.mjs  "$BIN/dashboard.mjs"
+fetch server/briefing.mjs   "$BIN/briefing.mjs"
 fetch server/update-self.sh "$BIN/update-self.sh"
 fetch VERSION               "$DL_APP/VERSION"
 fetch workspace-seed/SOUL.md  "$DL_APP/workspace/SOUL.md" 2>/dev/null || true
@@ -139,6 +141,9 @@ DL_NO_SUDO=1
 PATH=$GOODPATH
 ALERT_TG_TOKEN=
 ALERT_TG_CHAT=
+DL_BRIEFING_URL=${DL_BRIEFING_URL:-}
+DL_BRIEFING_KEY=${DL_BRIEFING_KEY:-}
+DL_BOX_ID=${DL_BOX_ID:-}
 EOF
 chmod 600 "$DL_SECRETS"
 # dashboard.env: ONLY web vars (no provider keys) - the web process never holds keys
@@ -194,12 +199,27 @@ cat > "$PLIST_UPD" <<EOF
   <key>StandardErrorPath</key><string>$DL_DATA/update.log</string>
 </dict></plist>
 EOF
+# Daily Briefing at 8am (computed insights -> Dream Labs relay / dashboard card)
+cat > "$LA/com.dreamlabs.briefing.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.dreamlabs.briefing</string>
+  <key>ProgramArguments</key><array><string>$NODE_DIR/node</string><string>$BIN/briefing.mjs</string></array>
+  <key>EnvironmentVariables</key><dict><key>DL_SECRETS</key><string>$DL_SECRETS</string><key>PATH</key><string>$GOODPATH</string></dict>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>0</integer></dict>
+  <key>StandardOutPath</key><string>$DL_DATA/briefing.log</string>
+  <key>StandardErrorPath</key><string>$DL_DATA/briefing.log</string>
+</dict></plist>
+EOF
 launchctl bootout "$DOMAIN/$LABEL_DASH" 2>/dev/null || true
 launchctl bootout "$DOMAIN/$LABEL_UPD" 2>/dev/null || true
+launchctl bootout "$DOMAIN/com.dreamlabs.briefing" 2>/dev/null || true
 launchctl bootstrap "$DOMAIN" "$PLIST_DASH"
 launchctl bootstrap "$DOMAIN" "$PLIST_UPD" 2>/dev/null || true
+launchctl bootstrap "$DOMAIN" "$LA/com.dreamlabs.briefing.plist" 2>/dev/null || true
 sleep 1
-ok "dashboard running on 127.0.0.1:$DASH_PORT (starts at login, restarts on crash)"
+ok "dashboard running on 127.0.0.1:$DASH_PORT (starts at login, restarts on crash); briefing daily 8am"
 
 # ---------- dreamlabs CLI ----------
 CLI=/usr/local/bin/dreamlabs
@@ -213,6 +233,7 @@ case "\${1:-}" in
   restart)     launchctl kickstart -k "\$D/$LABEL_DASH"; echo restarted ;;
   logs)        tail -n 50 "$DL_DATA/dashboard.err.log" "$DL_DATA/dashboard.out.log" 2>/dev/null ;;
   update)      touch "$DL_DATA/.update-requested"; echo "update requested (watcher will apply); or: bash $BIN/update-self.sh" ;;
+  briefing)    DL_SECRETS=$DL_SECRETS node "$BIN/briefing.mjs" ;;
   run)         "$BIN/run-agent.sh" "\$2" manual ;;
   uninstall)   bash "$SELFDIR/install-macos.sh" uninstall 2>/dev/null || curl -fsSL "$REPO_RAW/install-macos.sh" | bash -s uninstall ;;
   *) echo "usage: dreamlabs {link|url|restart|logs|update|run <id>|uninstall}" ;;

@@ -59,7 +59,8 @@ ownership upgrade. Do not gate the core experience behind a server.
 | All-click provider connect (OAuth + key) | DONE | device flow spawned by dashboard, multiple, swap default |
 | GitHub connect (PAT) + repo picker + per-agent clone | DONE | tested against a real account (16 repos) |
 | Dream Labs template gallery in the create form | DONE | public templates clone with no token |
-| Calendar tab (agenda from crons) | DONE (basic) | upgrade to a month-grid is queued |
+| Calendar tab (Google-Calendar month grid) | DONE | day cells, TODAY highlight, high-freq collapse to "x N", month nav |
+| Daily Briefing (run-health insights) | DONE (box side) | computed; shown in dashboard; delivers via Dream Labs relay (section 11) |
 | Self-update ("Update" button + CLI) | DONE | dashboard requests, root task validates + applies |
 | Setup wizard (stepped, branded, sci-fi) | DONE | `wizard/index.html`, generates the install command |
 | Audit | DONE | `AUDIT.md` (fixed F1, F2, B1-B4; known limits listed) |
@@ -236,22 +237,60 @@ Confirmed with the owner 2026-06-07:
 
 ## 9. Queue / roadmap (the "design things to tweak" + next builds)
 
-1. **Calendar -> Google-Calendar month grid.** Day cells with the agents scheduled;
-   collapse high-frequency routines to "AgentName x48" instead of 48 rows. (Cron
-   eval already exists in `dashboard.mjs`: `cronMatches` / `upcomingRuns`.)
+1. ~~Calendar Google-Calendar month grid.~~ **DONE (v0.8.0)** - month grid, TODAY
+   highlight, high-freq collapse to "x N", month nav. (Week-view toggle is a nice
+   future add; design B from the team explorations is ready for it.)
 2. **Installer OAuth run-inline.** The first-provider sign-in should run smoothly
    inside the bash prompter (device flow), not just print a command.
 3. **DL-hosted templates + fork-and-upload skeleton.** One-click "Fork this template
    to my GitHub" (GitHub API) + a small brand-voice/business uploader to the fork.
-4. **Daily Briefing insights.** A built-in "house" agent that runs via the jailed
-   runner (which has the key) and writes a run-health summary the dashboard shows -
-   so the dashboard is smart without putting keys in the web process.
+4. ~~Daily Briefing insights.~~ **DONE box-side (v0.9.0)** - computed insights,
+   dashboard card, daily schedule, delivered via the Dream Labs relay (section 11).
+   Remaining: the DL backend relay endpoint + bot (the dev's piece) and optional
+   AI-narrative enrichment.
 5. **GitHub App tier** (power option): one-click manifest -> user's own App ->
    short-lived per-repo-per-run installation tokens + native webhook triggers.
 6. **Wizard provisions a Dream Labs backend key** (eventual): the wizard URL becomes
    a logged-in portal that also mints the customer's Dream Labs key.
 7. **Provider connect UI polish:** a real status (connected/verified) check; a
    "Connect provider" surface mirroring the GitHub one (mostly done).
+
+---
+
+## 11. Daily Briefing + Dream Labs relay (for the backend dev)
+
+Goal (owner's call): the daily insights go out on a **Dream Labs-controlled
+Telegram bot, run by us** - the customer does NOT set up their own bot. We keep
+the channel and the visibility.
+
+How it works:
+- On the box, `server/briefing.mjs` runs daily (launchd on Mac / cron.d on Linux,
+  8am). It computes run-health from the box's own data (no provider key needed,
+  nothing secret in the web process): agents, runs today, failures, per-agent
+  state (healthy / failing / paused / never-run), and which need attention.
+- It writes `data/briefing.json` (the dashboard shows a "Daily Briefing" card),
+  then delivers in this order:
+  1. **Dream Labs relay** if `DL_BRIEFING_URL` is set (the intended path).
+  2. Local Telegram fallback (`ALERT_TG_TOKEN`/`CHAT`) for pure self-hosters.
+  3. Otherwise stored only (dashboard still shows it).
+
+**The relay contract the Dream Labs backend implements** (this is the dev's piece):
+```
+POST  {DL_BRIEFING_URL}            e.g. https://api.joindreamlabs.com/v1/briefing
+Authorization: Bearer {DL_BRIEFING_KEY}   # per-box key DL issues (ties to the
+                                          # "wizard provisions a DL key" idea)
+body: { boxId, generatedAt, summary, details:[{id,name,provider,state,failStreak}] }
+```
+DL backend: look up `boxId` -> the owner's linked Telegram chat (the owner DM'd
+the DL bot `/start` once at signup, DL stored the mapping) -> relay `summary` via
+DL's bot. The box never holds a Telegram token; DL owns the bot and the mapping.
+
+To enable on a box: set `DL_BRIEFING_URL`, `DL_BRIEFING_KEY`, `DL_BOX_ID` in
+secrets.env (installer leaves them blank; the wizard-provisioned key fills them).
+Test now: `dreamlabs briefing` (generates + shows the card; delivers if configured).
+
+Future: optionally enrich the summary with an AI-written narrative via the jailed
+runner (uses the customer's key, stays out of the web process).
 
 ---
 

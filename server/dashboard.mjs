@@ -580,6 +580,18 @@ function calendarBody(mo = 0) {
     <p class="hint" style="margin-top:10px">High-frequency routines collapse to <b>x N</b> per day. Each chip links to its routine.</p>`;
 }
 
+// Daily Briefing card (written by briefing.mjs; delivered via the Dream Labs relay).
+function briefingCard() {
+  const b = readJSON(join(DATA, 'briefing.json'), null);
+  if (!b) return '';
+  const att = (b.needAttention || []).length;
+  return `<div class="card" style="padding:15px 18px;margin-bottom:14px;border-left:2px solid var(--${att ? 'amber' : 'green'})">
+    <div class="flex-between"><div class="r-name">Daily Briefing <span class="tert" style="font-weight:400">· ${esc(relTime(b.generatedAt))}</span></div>
+      <span class="pill ${att ? 'paused' : 'live'}"><span class="dotmark"></span>${att ? att + ' need attention' : 'all healthy'}</span></div>
+    <div class="kv" style="margin-top:8px"><span><b>${esc(b.agents)}</b> agents</span><span><b>${esc(b.runsToday)}</b> runs today</span>${b.failsToday ? `<span class="rc-bad"><b>${esc(b.failsToday)}</b> failed</span>` : ''}<span><b>${esc(b.healthy)}</b> healthy</span></div>
+    ${att ? `<div style="margin-top:8px;font-size:12.5px;color:var(--muted)">${b.needAttention.map(d => `${esc(d.name)} <span class="tert">(${esc(d.state)})</span>`).join(' · ')}</div>` : ''}</div>`;
+}
+
 function pageList(view, mo) {
   const isCal = view === 'calendar';
   const { routines } = readRoutines();
@@ -617,7 +629,7 @@ function pageList(view, mo) {
     <a class="tab ${isCal ? '' : 'on'}" href="/">All</a>
     <a class="tab ${isCal ? 'on' : ''}" href="/?view=calendar">Calendar</a>
   </div></div>
-  ${isCal ? calendarBody(mo || 0) : `<div class="card">${rows || `<div class="empty"><div class="big">No routines yet</div><div>Create one and it runs on your own server, on your schedule.</div><div style="margin-top:16px"><a class="btn" href="/new">+ New routine</a></div></div>`}</div>`}`;
+  ${isCal ? calendarBody(mo || 0) : briefingCard() + `<div class="card">${rows || `<div class="empty"><div class="big">No routines yet</div><div>Create one and it runs on your own server, on your schedule.</div><div style="margin-top:16px"><a class="btn" href="/new">+ New routine</a></div></div>`}</div>`}`;
   return layout('Routines', body);
 }
 
