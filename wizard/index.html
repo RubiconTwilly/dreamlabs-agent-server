@@ -139,10 +139,10 @@ select:focus,input.txt:focus{outline:0;border-color:var(--border-on);box-shadow:
       <p class="sub">Paste this into a fresh Ubuntu box (or your Mac). No secrets in it.</p>
       <div class="cmd" id="cmd"></div>
       <button class="btn full" style="margin-top:14px" onclick="copyCmd(this)">Copy install command</button>
-      <div class="warn" style="margin-top:16px">You sign in to your provider during install (a quick approve step). Then open the dashboard link it prints and build agents by click.</div>
+      <div class="warn" style="margin-top:16px">If you chose a provider, you approve its sign-in during install. Then open the dashboard link it prints and connect anything else (more providers, GitHub, agents) by click.</div>
       <div class="next-steps">
         <div><b>1.</b> Run the command on your box.</div>
-        <div><b>2.</b> Approve your <span id="provName">provider</span> sign-in.</div>
+        <div id="ns2"><b>2.</b> Approve your <span id="provName">provider</span> sign-in.</div>
         <div><b>3.</b> Open your dashboard, connect GitHub, create your first agent.</div>
       </div>
       <div class="nav"><button class="btn ghost" onclick="go(1)">Back</button><span></span></div>
@@ -164,12 +164,18 @@ const byId = id => PROVIDERS.find(p=>p.id===id);
 
 function fillProviders(){
   document.getElementById('provider').innerHTML = '<option value="" disabled>Select your provider</option>' +
-    PROVIDERS.map(p=>`<option value="${p.id}" ${p.id===state.provider?'selected':''}>${p.name}</option>`).join('');
+    PROVIDERS.map(p=>`<option value="${p.id}" ${p.id===state.provider?'selected':''}>${p.name}</option>`).join('') +
+    `<option value="skip" ${state.provider==='skip'?'selected':''}>Skip - connect a provider later in the dashboard</option>`;
   onProvider();
 }
 function onProvider(){
   const sel=document.getElementById('provider'); if(sel.value) state.provider=sel.value;
-  const p=byId(state.provider);
+  if(state.provider==='skip'){
+    document.getElementById('provBadges').innerHTML='<span class="badge">set up later</span>';
+    document.getElementById('authField').style.display='none';
+    return;
+  }
+  const p=byId(state.provider); if(!p) return;
   document.getElementById('provBadges').innerHTML = p.auth.map(a=>`<span class="badge ${a==='oauth'?'oauth':''}">${a==='oauth'?'Sign in (OAuth)':'API key'}</span>`).join('');
   if(!p.auth.includes(state.auth)) state.auth=p.auth[0];
   const lab={oauth:'Sign in (subscription)',key:'API key'};
@@ -184,15 +190,24 @@ function authHint(){
     : 'During install you paste your '+p.keyName+'. Stored in a root-only file the web app cannot read.';
 }
 function fillModels(){
+  const mf=document.getElementById('model').closest('.field');
+  const ns2=document.getElementById('ns2');
+  if(state.provider==='skip'){
+    mf.style.display='none'; state.model='';
+    ns2.innerHTML='<b>2.</b> Open your dashboard and connect a provider (one click).';
+    return;
+  }
+  mf.style.display='block';
   const p=byId(state.provider);
   document.getElementById('model').innerHTML = p.models.map(m=>`<option value="${m}">${m||'Provider default'}</option>`).join('');
   state.model=p.models[0]||'';
-  document.getElementById('provName').textContent = p.name;
+  ns2.innerHTML = state.auth==='oauth' ? `<b>2.</b> Approve your <b>${p.name}</b> sign-in.` : `<b>2.</b> Paste your <b>${p.keyName}</b>.`;
 }
 function buildCmd(){
-  const p=byId(state.provider); const env=[];
-  env.push(['DL_PROVIDER',p.id]); env.push(['DL_AUTH', p.auth.includes(state.auth)?state.auth:'key']);
-  if(state.model) env.push(['DL_MODEL',state.model]); env.push(['DL_ACCESS',state.access]);
+  const env=[];
+  if(state.provider==='skip'){ env.push(['DL_PROVIDER','skip']); }
+  else { const p=byId(state.provider); env.push(['DL_PROVIDER',p.id]); env.push(['DL_AUTH', p.auth.includes(state.auth)?state.auth:'key']); if(state.model) env.push(['DL_MODEL',state.model]); }
+  env.push(['DL_ACCESS',state.access]);
   const s = env.map(([k,v])=>`<span class="k">${k}</span>=<span class="v">${v}</span>`).join(' \\\n  ');
   document.getElementById('cmd').innerHTML = `curl -fsSL https://get.joindreamlabs.com/install.sh | \\\n  ${s} \\\n  bash`;
 }

@@ -25,9 +25,10 @@ Anthropic dependency at runtime.
 
 Core UX rule (load-bearing): **all click, no terminal.** The only terminal moment
 is pasting the one install command; the installer connects the FIRST provider via
-a prompter (you are in the terminal there anyway). After that, the dashboard does
-everything - including OAuth, where the dashboard runs the device flow and the
-user only approves in a browser.
+a prompter (you are in the terminal there anyway) - OR pick "Skip" (in the wizard
+or installer) to stand up just the dashboard and connect every provider later by
+click. After that, the dashboard does everything - including OAuth, where the
+dashboard runs the device flow and the user only approves in a browser.
 
 ---
 

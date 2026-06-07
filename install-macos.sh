@@ -84,34 +84,35 @@ ok "dashboard + runner + updater, v$(cat "$DL_APP/VERSION" 2>/dev/null)"
 PROVIDER="${DL_PROVIDER:-}"
 if [ -z "$PROVIDER" ]; then
   say "Which AI provider should agents use?"
-  echo "    1) Claude Code   2) OpenAI Codex   3) xAI Grok   4) Google Gemini   5) DeepSeek   6) Any API"
-  case "$(ask 'Provider 1-6' '1')" in 2) PROVIDER=codex;; 3) PROVIDER=grok;; 4) PROVIDER=gemini;; 5) PROVIDER=deepseek;; 6) PROVIDER=api;; *) PROVIDER=claude;; esac
+  echo "    1) Claude Code   2) OpenAI Codex   3) xAI Grok   4) Google Gemini   5) DeepSeek   6) Any API   7) Skip (set up later in the dashboard)"
+  case "$(ask 'Provider 1-7' '1')" in 2) PROVIDER=codex;; 3) PROVIDER=grok;; 4) PROVIDER=gemini;; 5) PROVIDER=deepseek;; 6) PROVIDER=api;; 7) PROVIDER=skip;; *) PROVIDER=claude;; esac
 fi
-case "$PROVIDER" in
-  claude) have claude || { warn "installing Claude Code CLI"; npm i -g @anthropic-ai/claude-code >/dev/null 2>&1 || warn "install manually"; } ;;
-  codex)  have codex  || { warn "installing Codex CLI";       npm i -g @openai/codex >/dev/null 2>&1 || warn "install manually"; } ;;
-  grok)   have grok   || { warn "installing Grok Build CLI";  curl -fsSL https://x.ai/cli/install.sh | bash >/dev/null 2>&1 || warn "install manually"; } ;;
-  gemini) have gemini || { warn "installing Gemini CLI";      npm i -g @google/gemini-cli >/dev/null 2>&1 || warn "install manually"; } ;;
-esac
-AUTH="${DL_AUTH:-}"; case "$PROVIDER" in deepseek|api) AUTH=key;; esac
-[ -z "$AUTH" ] && { AUTH="$(ask 'Auth: (o)auth subscription or (k)ey' 'o')"; case "$AUTH" in o*) AUTH=oauth;; *) AUTH=key;; esac; }
-
-ANTHROPIC_API_KEY="" CLAUDE_CODE_OAUTH_TOKEN="" OPENAI_API_KEY="" XAI_API_KEY="" GEMINI_API_KEY="" API_BASE_URL=""
-key_in(){ echo "${DL_KEY:-$(secret_in "$1")}"; }   # DL_KEY env override (for headless/testing)
-oauth_now(){ # OAuth caches in THIS user's home; run the login as this user now
-  warn "Sign in (a browser/device step), then press Enter:"; echo "      $*"
-  [ -n "${DL_KEY:-}" ] || read -r </dev/tty || true
-}
-case "$PROVIDER" in
-  claude) if [ "$AUTH" = oauth ]; then warn "Run, then paste the printed token:"; echo "      claude setup-token"; CLAUDE_CODE_OAUTH_TOKEN="$(key_in 'Paste Claude OAuth token')"; else ANTHROPIC_API_KEY="$(key_in 'Paste ANTHROPIC_API_KEY')"; fi ;;
-  codex)  if [ "$AUTH" = oauth ]; then oauth_now "codex login --device-auth"; else OPENAI_API_KEY="$(key_in 'Paste OPENAI_API_KEY')"; fi ;;
-  grok)   if [ "$AUTH" = oauth ]; then oauth_now "grok auth login"; else XAI_API_KEY="$(key_in 'Paste XAI_API_KEY')"; fi ;;
-  gemini) if [ "$AUTH" = oauth ]; then oauth_now "gemini   # choose Sign in with Google"; else GEMINI_API_KEY="$(key_in 'Paste GEMINI_API_KEY')"; fi ;;
-  deepseek) OPENAI_API_KEY="$(key_in 'Paste DeepSeek API key')"; API_BASE_URL="https://api.deepseek.com" ;;
-  api)    API_BASE_URL="${DL_API_BASE:-$(ask 'OpenAI-compatible base URL' 'https://api.openai.com')}"; OPENAI_API_KEY="$(key_in 'Paste API key')" ;;
-esac
-MODEL="${DL_MODEL:-}"
-ok "provider: $PROVIDER ($AUTH)"
+# Always init so the secrets heredoc is safe under set -u, and so skip works.
+ANTHROPIC_API_KEY="" CLAUDE_CODE_OAUTH_TOKEN="" OPENAI_API_KEY="" XAI_API_KEY="" GEMINI_API_KEY="" API_BASE_URL="" AUTH=none MODEL="${DL_MODEL:-}"
+if [ "$PROVIDER" = skip ]; then
+  PROVIDER=""
+  ok "no provider yet - you'll connect one in the dashboard (one click) after install"
+else
+  case "$PROVIDER" in
+    claude) have claude || { warn "installing Claude Code CLI"; npm i -g @anthropic-ai/claude-code >/dev/null 2>&1 || warn "install manually"; } ;;
+    codex)  have codex  || { warn "installing Codex CLI";       npm i -g @openai/codex >/dev/null 2>&1 || warn "install manually"; } ;;
+    grok)   have grok   || { warn "installing Grok Build CLI";  curl -fsSL https://x.ai/cli/install.sh | bash >/dev/null 2>&1 || warn "install manually"; } ;;
+    gemini) have gemini || { warn "installing Gemini CLI";      npm i -g @google/gemini-cli >/dev/null 2>&1 || warn "install manually"; } ;;
+  esac
+  AUTH="${DL_AUTH:-}"; case "$PROVIDER" in deepseek|api) AUTH=key;; esac
+  [ -z "$AUTH" ] && { AUTH="$(ask 'Auth: (o)auth subscription or (k)ey' 'o')"; case "$AUTH" in o*) AUTH=oauth;; *) AUTH=key;; esac; }
+  key_in(){ echo "${DL_KEY:-$(secret_in "$1")}"; }   # DL_KEY env override (for headless/testing)
+  oauth_now(){ warn "Sign in (a browser/device step), then press Enter:"; echo "      $*"; [ -n "${DL_KEY:-}" ] || read -r </dev/tty || true; }
+  case "$PROVIDER" in
+    claude) if [ "$AUTH" = oauth ]; then warn "Run, then paste the printed token:"; echo "      claude setup-token"; CLAUDE_CODE_OAUTH_TOKEN="$(key_in 'Paste Claude OAuth token')"; else ANTHROPIC_API_KEY="$(key_in 'Paste ANTHROPIC_API_KEY')"; fi ;;
+    codex)  if [ "$AUTH" = oauth ]; then oauth_now "codex login --device-auth"; else OPENAI_API_KEY="$(key_in 'Paste OPENAI_API_KEY')"; fi ;;
+    grok)   if [ "$AUTH" = oauth ]; then oauth_now "grok auth login"; else XAI_API_KEY="$(key_in 'Paste XAI_API_KEY')"; fi ;;
+    gemini) if [ "$AUTH" = oauth ]; then oauth_now "gemini   # choose Sign in with Google"; else GEMINI_API_KEY="$(key_in 'Paste GEMINI_API_KEY')"; fi ;;
+    deepseek) OPENAI_API_KEY="$(key_in 'Paste DeepSeek API key')"; API_BASE_URL="https://api.deepseek.com" ;;
+    api)    API_BASE_URL="${DL_API_BASE:-$(ask 'OpenAI-compatible base URL' 'https://api.openai.com')}"; OPENAI_API_KEY="$(key_in 'Paste API key')" ;;
+  esac
+  ok "provider: $PROVIDER ($AUTH)"
+fi
 
 # ---------- secrets ----------
 DASH_PORT="${DASH_PORT:-$(randport)}"; DASH_TOKEN="$(randhex 24)"; WEBHOOK_SECRET="$(randhex 16)"
@@ -158,7 +159,8 @@ DL_UPDATE_URL=$UPDATE_URL
 PATH=$GOODPATH
 EOF
 chmod 600 "$DL_DASHENV"
-printf '{"%s":true,"updatedAt":"%s"}\n' "$PROVIDER" "$(date -u +%FT%TZ)" > "$DL_DATA/providers.json"
+if [ -n "$PROVIDER" ]; then printf '{"%s":true,"default":"%s","updatedAt":"%s"}\n' "$PROVIDER" "$PROVIDER" "$(date -u +%FT%TZ)" > "$DL_DATA/providers.json"
+else printf '{"updatedAt":"%s"}\n' "$(date -u +%FT%TZ)" > "$DL_DATA/providers.json"; fi
 ok "secrets split (provider keys in secrets.env, web vars in dashboard.env), chmod 600"
 
 # ---------- launch wrappers ----------

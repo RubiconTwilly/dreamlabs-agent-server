@@ -93,51 +93,38 @@ ok "runner, jail, dashboard, updater, v$(cat "$DL_APP/VERSION" 2>/dev/null||echo
 PROVIDER="${DL_PROVIDER:-}"
 if [ -z "$PROVIDER" ]; then
   say "Which AI provider should agents use?"
-  echo "    1) Claude Code   2) OpenAI Codex   3) xAI Grok   4) Google Gemini   5) DeepSeek   6) Any API"
-  case "$(ask 'Provider 1-6' '1')" in 2) PROVIDER=codex;; 3) PROVIDER=grok;; 4) PROVIDER=gemini;; 5) PROVIDER=deepseek;; 6) PROVIDER=api;; *) PROVIDER=claude;; esac
+  echo "    1) Claude Code   2) OpenAI Codex   3) xAI Grok   4) Google Gemini   5) DeepSeek   6) Any API   7) Skip (set up later in the dashboard)"
+  case "$(ask 'Provider 1-7' '1')" in 2) PROVIDER=codex;; 3) PROVIDER=grok;; 4) PROVIDER=gemini;; 5) PROVIDER=deepseek;; 6) PROVIDER=api;; 7) PROVIDER=skip;; *) PROVIDER=claude;; esac
 fi
-say "Provider: $PROVIDER"
 
-# install the right CLI
-case "$PROVIDER" in
-  claude) have claude || { warn "installing Claude Code CLI"; npm i -g @anthropic-ai/claude-code >/dev/null 2>&1 || warn "install manually: npm i -g @anthropic-ai/claude-code"; } ;;
-  codex)  have codex  || { warn "installing Codex CLI";       npm i -g @openai/codex >/dev/null 2>&1 || warn "install manually: npm i -g @openai/codex"; } ;;
-  grok)   have grok   || { warn "installing Grok Build CLI";  curl -fsSL https://x.ai/cli/install.sh | bash >/dev/null 2>&1 || warn "install manually: curl -fsSL https://x.ai/cli/install.sh | bash"; } ;;
-  gemini) have gemini || { warn "installing Gemini CLI";      npm i -g @google/gemini-cli >/dev/null 2>&1 || warn "install manually: npm i -g @google/gemini-cli"; } ;;
-esac
-
-# auth: only claude/codex/grok/gemini support oauth; deepseek/api are key-only
-AUTH="${DL_AUTH:-}"
-case "$PROVIDER" in deepseek|api) AUTH=key;; esac
-if [ -z "$AUTH" ]; then AUTH="$(ask 'Auth: (o)auth subscription or (k)ey' 'o')"; case "$AUTH" in o*) AUTH=oauth;; *) AUTH=key;; esac; fi
-
-# collect the secret. OAuth for codex/grok/gemini caches in the AGENT user's HOME.
-ANTHROPIC_API_KEY=""; CLAUDE_CODE_OAUTH_TOKEN=""; OPENAI_API_KEY=""; XAI_API_KEY=""; GEMINI_API_KEY=""; API_BASE_URL=""
-prov_claude=false prov_codex=false prov_grok=false prov_gemini=false prov_deepseek=false prov_api=false
-agent_oauth(){ # run an interactive login AS the agent user so creds cache in its HOME
-  warn "Authorise as the agent user, then press Enter here:"; echo "      sudo -u $AGENT_USER $*"
-  read -r </dev/tty || true
-}
-case "$PROVIDER" in
-  claude) prov_claude=true
-    if [ "$AUTH" = oauth ]; then
-      warn "Run this (it prints a ~1-year token), paste it below:"; echo "      sudo -u $AGENT_USER claude setup-token"
-      CLAUDE_CODE_OAUTH_TOKEN="$(secret_in 'Paste the Claude OAuth token')"
-    else ANTHROPIC_API_KEY="$(secret_in 'Paste ANTHROPIC_API_KEY')"; fi ;;
-  codex) prov_codex=true
-    if [ "$AUTH" = oauth ]; then agent_oauth "codex login --device-auth"; else OPENAI_API_KEY="$(secret_in 'Paste OPENAI_API_KEY')"; fi ;;
-  grok) prov_grok=true
-    if [ "$AUTH" = oauth ]; then agent_oauth "grok auth login"; else XAI_API_KEY="$(secret_in 'Paste XAI_API_KEY')"; fi ;;
-  gemini) prov_gemini=true
-    if [ "$AUTH" = oauth ]; then agent_oauth "gemini   # then choose 'Sign in with Google'"; else GEMINI_API_KEY="$(secret_in 'Paste GEMINI_API_KEY')"; fi ;;
-  deepseek) prov_deepseek=true
-    OPENAI_API_KEY="$(secret_in 'Paste DeepSeek API key')"; API_BASE_URL="https://api.deepseek.com" ;;
-  api) prov_api=true
-    API_BASE_URL="${DL_API_BASE:-$(ask 'OpenAI-compatible base URL' 'https://api.openai.com')}"
-    OPENAI_API_KEY="$(secret_in 'Paste API key')" ;;
-esac
-MODEL="${DL_MODEL:-}"
-ok "provider configured ($AUTH)"
+# init (safe under set -u; also the skip path)
+ANTHROPIC_API_KEY=""; CLAUDE_CODE_OAUTH_TOKEN=""; OPENAI_API_KEY=""; XAI_API_KEY=""; GEMINI_API_KEY=""; API_BASE_URL=""; AUTH=none; MODEL="${DL_MODEL:-}"
+if [ "$PROVIDER" = skip ]; then
+  PROVIDER=""
+  say "No provider yet - connect one in the dashboard (one click) after install"
+else
+  say "Provider: $PROVIDER"
+  # install the right CLI
+  case "$PROVIDER" in
+    claude) have claude || { warn "installing Claude Code CLI"; npm i -g @anthropic-ai/claude-code >/dev/null 2>&1 || warn "install manually"; } ;;
+    codex)  have codex  || { warn "installing Codex CLI";       npm i -g @openai/codex >/dev/null 2>&1 || warn "install manually"; } ;;
+    grok)   have grok   || { warn "installing Grok Build CLI";  curl -fsSL https://x.ai/cli/install.sh | bash >/dev/null 2>&1 || warn "install manually"; } ;;
+    gemini) have gemini || { warn "installing Gemini CLI";      npm i -g @google/gemini-cli >/dev/null 2>&1 || warn "install manually"; } ;;
+  esac
+  # auth: only claude/codex/grok/gemini support oauth; deepseek/api are key-only
+  AUTH="${DL_AUTH:-}"; case "$PROVIDER" in deepseek|api) AUTH=key;; esac
+  if [ -z "$AUTH" ]; then AUTH="$(ask 'Auth: (o)auth subscription or (k)ey' 'o')"; case "$AUTH" in o*) AUTH=oauth;; *) AUTH=key;; esac; fi
+  agent_oauth(){ warn "Authorise as the agent user, then press Enter here:"; echo "      sudo -u $AGENT_USER $*"; read -r </dev/tty || true; }
+  case "$PROVIDER" in
+    claude) if [ "$AUTH" = oauth ]; then warn "Run this (prints a ~1-year token), paste below:"; echo "      sudo -u $AGENT_USER claude setup-token"; CLAUDE_CODE_OAUTH_TOKEN="$(secret_in 'Paste the Claude OAuth token')"; else ANTHROPIC_API_KEY="$(secret_in 'Paste ANTHROPIC_API_KEY')"; fi ;;
+    codex)  if [ "$AUTH" = oauth ]; then agent_oauth "codex login --device-auth"; else OPENAI_API_KEY="$(secret_in 'Paste OPENAI_API_KEY')"; fi ;;
+    grok)   if [ "$AUTH" = oauth ]; then agent_oauth "grok auth login"; else XAI_API_KEY="$(secret_in 'Paste XAI_API_KEY')"; fi ;;
+    gemini) if [ "$AUTH" = oauth ]; then agent_oauth "gemini   # then choose Sign in with Google"; else GEMINI_API_KEY="$(secret_in 'Paste GEMINI_API_KEY')"; fi ;;
+    deepseek) OPENAI_API_KEY="$(secret_in 'Paste DeepSeek API key')"; API_BASE_URL="https://api.deepseek.com" ;;
+    api)    API_BASE_URL="${DL_API_BASE:-$(ask 'OpenAI-compatible base URL' 'https://api.openai.com')}"; OPENAI_API_KEY="$(secret_in 'Paste API key')" ;;
+  esac
+  ok "provider configured ($AUTH)"
+fi
 
 # ----- 5. default workspace (repos are added PER AGENT from the dashboard) -----
 # The installer sets up the platform only. No repo, schedule, or agent here -
@@ -220,7 +207,8 @@ DL_APP=$DL_APP
 DL_UPDATE_URL=$UPDATE_URL
 EOF
 chown root:"$SVC_USER" "$DL_SECRETS_DIR/dashboard.env"; chmod 640 "$DL_SECRETS_DIR/dashboard.env"
-printf '{"%s":true,"updatedAt":"%s"}\n' "$PROVIDER" "$(date -u +%FT%TZ)" > "$DL_DATA/providers.json"
+if [ -n "$PROVIDER" ]; then printf '{"%s":true,"default":"%s","updatedAt":"%s"}\n' "$PROVIDER" "$PROVIDER" "$(date -u +%FT%TZ)" > "$DL_DATA/providers.json"
+else printf '{"updatedAt":"%s"}\n' "$(date -u +%FT%TZ)" > "$DL_DATA/providers.json"; fi
 ok "secrets split: provider keys in secrets.env (runner only), web vars in dashboard.env"
 
 # (No agents are created at install. The customer adds them in the dashboard.)
