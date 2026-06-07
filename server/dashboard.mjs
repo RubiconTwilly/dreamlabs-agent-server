@@ -207,7 +207,13 @@ async function ghDeviceStart() {
 }
 async function ghDevicePoll() {
   const dev = githubDevice(); if (!dev || !dev.device_code) return { idle: true };
-  if (Date.now() - (dev.startedAt || 0) > (dev.expires_in || 900) * 1000) { clearGithubDevice(); return { error: 'expired' }; }
+  const now = Date.now();
+  if (now - (dev.startedAt || 0) > (dev.expires_in || 900) * 1000) { clearGithubDevice(); return { error: 'expired' }; }
+  // Respect GitHub's polling interval. Hitting the endpoint faster triggers
+  // slow_down, which ratchets the interval up and stalls the whole flow.
+  const intervalMs = (dev.interval || 5) * 1000;
+  if (now - (dev.lastPoll || 0) < intervalMs) return { pending: true };
+  writeFileSync(GITHUB_DEVICE, JSON.stringify({ ...dev, lastPoll: now }));
   try {
     const r = await fetch('https://github.com/login/oauth/access_token', {
       method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' },
@@ -222,7 +228,8 @@ async function ghDevicePoll() {
       clearGithubDevice();
       return { connected: true };
     }
-    if (d.error === 'authorization_pending' || d.error === 'slow_down') return { pending: true };
+    if (d.error === 'slow_down') { writeFileSync(GITHUB_DEVICE, JSON.stringify({ ...dev, lastPoll: now, interval: d.interval || (dev.interval || 5) + 5 })); return { pending: true }; }
+    if (d.error === 'authorization_pending') return { pending: true };
     clearGithubDevice(); return { error: d.error || 'failed' };
   } catch { return { pending: true }; }
 }
@@ -758,15 +765,18 @@ function formPage(r, prefill) {
         <textarea name="instructions" placeholder="Describe what the agent should do in each session">${esc(instr || '')}</textarea>
         <div class="dock">
           <div class="dock-l">
-            <span class="dockicon">⎇ <input name="repo" id="repo" list="repolist" value="${esc(r.repo || '')}" placeholder="Select a repository" autocomplete="off" style="background:transparent;border:0;padding:4px 6px;width:230px;font-size:12.5px"><datalist id="repolist"></datalist></span>
-          </div>
-          <div class="dock-r">
-            <select name="model" title="Model">${modelOpts.map(m => opt(m, r.model, m || 'Default model')).join('')}</select>
-            <select name="provider" title="Environment / provider" onchange="syncModels(this.value)">${configuredProviders(r.provider).map(p => opt(p, r.provider, '☁ ' + PROVIDER_LABEL[p])).join('')}</select>
+            <span class="dockicon">⎇ <input name="repo" id="repo" list="repolist" value="${esc(r.repo || '')}" placeholder="Select a repository (optional)" autocomplete="off" style="background:transparent;border:0;padding:4px 6px;width:300px;font-size:12.5px"><datalist id="repolist"></datalist></span>
           </div>
         </div>
       </div>
-      <span class="hint">The prompt the agent receives every run. Treat it like a SOUL: goal, constraints, and what “done” looks like.</span></label>
+      <span class="hint">The prompt the agent receives every run. Treat it like a SOUL: goal, constraints, and what "done" looks like.</span></label>
+
+    <label class="field"><span class="lab">Which AI runs this agent?</span>
+      <span class="hint">Each agent picks its own connected provider - e.g. Claude Code (Anthropic) or Codex (OpenAI). Connect more under Access &amp; keys.</span>
+      <div class="grid2">
+        <select name="provider" onchange="syncModels(this.value)">${configuredProviders(r.provider).map(p => opt(p, r.provider, PROVIDER_LABEL[p])).join('')}</select>
+        <select name="model" title="Model">${modelOpts.map(m => opt(m, r.model, m || 'Default model')).join('')}</select>
+      </div></label>
 
     <div>
       <div class="lab" style="margin-bottom:10px">Select a trigger</div>
@@ -968,7 +978,7 @@ function githubPage(opts) {
       <li>The token is stored in a 600 file the runner reads, never shown again or committed.</li>
     </ol></div>`;
 
-  const refresh = devActive ? '<meta http-equiv="refresh" content="4">' : '';
+  const refresh = devActive ? '<meta http-equiv="refresh" content="6">' : '';
   const body = `${refresh}
     <a class="back" href="/access">< Access &amp; keys</a>
     <h2 class="title">Connect GitHub</h2>
@@ -1073,9 +1083,12 @@ async function accessPage() {
 
   const provRows = PROVIDERS.map(p => {
     const on = !!st[p];
-    return `<div class="cred"><span>${esc(PROVIDER_LABEL[p])}</span>${on
-      ? '<span class="pill live"><span class="dotmark"></span>connected</span>'
-      : '<span class="pill"><span class="dotmark"></span>not configured</span>'}</div>`;
+    const isDefault = st.default === p;
+    return `<div class="cred">
+      <span>${esc(PROVIDER_LABEL[p])}${isDefault ? ' <span class="pill live" style="margin-left:6px">default</span>' : ''}</span>
+      <span class="row-actions">${on
+        ? `<span class="pill live"><span class="dotmark"></span>connected</span> <a class="btn ghost sm" href="/provider/${p}">Manage</a>`
+        : `<a class="btn sm" href="/provider/${p}">Connect</a>`}</span></div>`;
   }).join('');
   const ghs = githubStatus();
   const ghRow = `<div class="cred"><span>GitHub${ghs.connected ? ' <span class="tert">(@' + esc(ghs.login) + ')</span>' : ''}</span>
