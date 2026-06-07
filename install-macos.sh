@@ -20,8 +20,8 @@ DL_DATA="$DL_APP/data"
 DL_SECRETS="$DL_APP/secrets.env"
 DL_DASHENV="$DL_APP/dashboard.env"
 BIN="$DL_APP/bin"
-REPO_RAW="${DL_SOURCE:-https://raw.githubusercontent.com/RubiconTwilly/dreamlabs-agent-server/main}"
-UPDATE_URL="${DL_UPDATE_URL:-https://raw.githubusercontent.com/RubiconTwilly/dreamlabs-agent-server/main}"
+REPO_RAW="${DL_SOURCE:-https://get.joindreamlabs.com}"
+UPDATE_URL="${DL_UPDATE_URL:-https://get.joindreamlabs.com}"
 LABEL_DASH="com.dreamlabs.dashboard"
 LABEL_UPD="com.dreamlabs.update"
 LA="$HOME/Library/LaunchAgents"
@@ -257,3 +257,5 @@ echo "  |  Now create agents in the dashboard: add a repo, a schedule, connector
 echo "  |  Anytime:  dreamlabs link | logs | update | restart | uninstall"
 echo "  +-----------------------------------------------------------"
 [ "$AUTH" = oauth ] && [ "$PROVIDER" != claude ] && warn "If you skipped the OAuth step, run it now: see the command above for $PROVIDER."
+# Auto-open the dashboard so they see it immediately.
+sleep 1; command -v open >/dev/null 2>&1 && open "$LINK" 2>/dev/null || true

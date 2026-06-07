@@ -31,7 +31,7 @@ const PROVIDERS_FILE = join(DATA, 'providers.json'); // {claude:bool,...} - STAT
 const VERSION_FILE = join(APP, 'VERSION');
 const UPDATE_FLAG = join(DATA, '.update-requested');   // dashboard writes; root systemd path applies
 const UPDATE_STATUS = join(DATA, 'update-status.json'); // root updater writes; dashboard reads
-const UPDATE_URL = process.env.DL_UPDATE_URL || 'https://raw.githubusercontent.com/RubiconTwilly/dreamlabs-agent-server/main';
+const UPDATE_URL = process.env.DL_UPDATE_URL || 'https://get.joindreamlabs.com';
 const GITHUB_TOKEN_FILE = join(DATA, 'github.token'); // 600, dreamlabs-owned. Read by dashboard (repo list) + runner (clone).
 const GITHUB_JSON = join(DATA, 'github.json');        // {connected, login} - no token
 const VERSION = (() => { try { return readFileSync(VERSION_FILE, 'utf8').trim(); } catch { return 'dev'; } })();
@@ -309,8 +309,8 @@ const CSS = `
   --field:#2b2926; --field-hover:#34322e;
   --border:rgba(255,255,255,.07); --border-strong:rgba(255,255,255,.13);
   --ink:#f5f4f2; --muted:#c6c2bb; --subtle:#928d84; --tertiary:#6c675f;
-  --accent:#c96442; --accent-soft:rgba(201,100,66,.16);
-  --white:#fafaf8; --green:#5cbb6e; --amber:#e0a948; --red:#e06b6b;
+  --accent:#c96442; --accent-soft:rgba(201,100,66,.16); --accent-line:rgba(201,100,66,.5);
+  --white:#fafaf8; --green:#5cbb6e; --amber:#e0a948; --red:#e06b6b; --log-bg:#141311;
   --warn-bg:rgba(224,169,72,.10); --warn-border:rgba(224,169,72,.28); --warn-ink:#e6b863;
   --r-sm:7px; --r-md:10px; --r-lg:14px; --r-xl:18px;
   --font:"SF Pro Text",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
@@ -430,7 +430,7 @@ legend{font-size:12px;color:var(--subtle);font-weight:560;padding:0 8px}
 .formfoot{display:flex;justify-content:flex-end;gap:10px;margin-top:6px}
 /* detail */
 .sectlabel{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--tertiary);font-weight:600;margin:26px 0 10px}
-.log{background:#141311;border:1px solid var(--border);border-radius:var(--r-md);padding:14px 16px;font-family:var(--mono);font-size:12px;line-height:1.65;color:var(--muted);white-space:pre-wrap;word-break:break-word;max-height:520px;overflow:auto}
+.log{background:var(--log-bg);border:1px solid var(--border);border-radius:var(--r-md);padding:14px 16px;font-family:var(--mono);font-size:12px;line-height:1.65;color:var(--muted);white-space:pre-wrap;word-break:break-word;max-height:520px;overflow:auto}
 .runrow{display:flex;align-items:center;justify-content:space-between;padding:11px 15px;border-bottom:1px solid var(--border);font-size:12.5px}
 .runrow:last-child{border-bottom:0}
 .runrow .ts{font-family:var(--mono);color:var(--tertiary);font-size:11px}
@@ -454,7 +454,7 @@ legend{font-size:12px;color:var(--subtle);font-weight:560;padding:0 8px}
 .cal-grid>.cal-cell:nth-last-child(-n+7){border-bottom:0}
 .cal-out{background:rgba(0,0,0,.16)} .cal-out .cal-n{color:var(--tertiary)}
 .cal-past{opacity:.4}
-.cal-today{background:linear-gradient(180deg,var(--accent-soft),transparent 65%);box-shadow:inset 0 0 0 1.5px rgba(201,100,66,.5)}
+.cal-today{background:linear-gradient(180deg,var(--accent-soft),transparent 65%);box-shadow:inset 0 0 0 1.5px var(--accent-line)}
 .cal-dn{display:flex;align-items:center;justify-content:space-between;min-height:21px}
 .cal-n{font-size:12px;font-weight:600;color:var(--muted);width:21px;height:21px;display:flex;align-items:center;justify-content:center;border-radius:50%}
 .cal-today .cal-n{background:var(--accent);color:#fff}
@@ -469,22 +469,61 @@ legend{font-size:12px;color:var(--subtle);font-weight:560;padding:0 8px}
 .cal-more{font-size:10px;color:var(--subtle);padding:1px 6px}
 .cal-chip.p-claude{border-left-color:var(--accent)} .cal-chip.p-codex{border-left-color:var(--green)} .cal-chip.p-grok{border-left-color:var(--amber)} .cal-chip.p-gemini{border-left-color:#6ea8e0} .cal-chip.p-deepseek{border-left-color:#9b7fe0} .cal-chip.p-api{border-left-color:var(--subtle)}
 @media(max-width:640px){.grid2,.grid3{grid-template-columns:1fr} .cal-grid{grid-auto-rows:minmax(76px,1fr)} .cal-nm{display:none}}
+
+/* ===================== THEME SWITCHER (top-right) ===================== */
+.themesw{display:inline-flex;align-items:center;gap:3px;background:var(--surface-2);border:1px solid var(--border);border-radius:9px;padding:3px;margin-right:6px}
+.themebtn{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:0;background:transparent;color:var(--subtle);font-family:inherit;font-size:12px;border-radius:7px;cursor:pointer;transition:all .12s ease}
+.themebtn:hover{color:var(--ink)}
+.themebtn.on{background:var(--surface-3);color:var(--ink)}
+.themebtn .sw{width:11px;height:11px;border-radius:50%;border:1px solid rgba(255,255,255,.25);flex:0 0 auto}
+.themebtn .sw-classic{background:#c96442}
+.themebtn .sw-dl{background:#2f7bf2}
+/* brand mark: bolt for classic, potion bottle for Dream Labs */
+.brand .mark-dl{display:none}
+@media(max-width:640px){.themebtn .tlab{display:none}}
+
+/* ===================== DREAM LABS THEME (opt-in; classic stays the default) ===================== */
+:root[data-theme="dreamlabs"]{
+  --canvas:#0b0f17; --surface-1:#121826; --surface-2:#1a2234; --surface-3:#232f47;
+  --field:#161e2e; --field-hover:#1f2a40;
+  --border:rgba(126,166,255,.10); --border-strong:rgba(126,166,255,.20);
+  --ink:#eef3fc; --muted:#b8c4dc; --subtle:#8492b0; --tertiary:#5c6a88;
+  --accent:#2f7bf2; --accent-soft:rgba(47,123,242,.18); --accent-line:rgba(47,123,242,.55);
+  --log-bg:#0a0e16;
+}
+:root[data-theme="dreamlabs"] body{background:radial-gradient(1100px 460px at 50% -12%,rgba(47,123,242,.12),transparent 62%),var(--canvas)}
+:root[data-theme="dreamlabs"] .btn{background:var(--accent);color:#fff;box-shadow:0 6px 18px -8px rgba(47,123,242,.6)}
+:root[data-theme="dreamlabs"] .btn:hover{filter:brightness(1.08)}
+:root[data-theme="dreamlabs"] .btn.ghost{background:var(--surface-2);color:var(--muted);box-shadow:none}
+:root[data-theme="dreamlabs"] .btn.ghost:hover{background:var(--surface-3);color:var(--ink)}
+:root[data-theme="dreamlabs"] .btn.danger{background:transparent;color:var(--red);box-shadow:none}
+:root[data-theme="dreamlabs"] code{background:rgba(126,166,255,.10)}
+:root[data-theme="dreamlabs"] .brand .mark-classic{display:none}
+:root[data-theme="dreamlabs"] .brand .mark-dl{display:inline-flex;color:var(--accent)}
 `;
 
 function layout(title, inner, crumb) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark">
+<script>try{if(localStorage.getItem('dlTheme')==='dreamlabs')document.documentElement.setAttribute('data-theme','dreamlabs');}catch(e){}</script>
 <title>${esc(title)} · Dream Labs</title><style>${CSS}</style></head>
 <body><div class="wrap">
 <header class="top">
-  <a class="brand" href="/"><span class="bolt">⚡</span>Routines${crumb ? ` <span class="crumb">/ ${esc(crumb)}</span>` : ''}</a>
+  <a class="brand" href="/"><span class="bolt mark-classic">⚡</span><svg class="bolt mark-dl" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9.5 3h5M10.5 3v5.4l-4.6 8A2.6 2.6 0 0 0 8.2 20.4h7.6a2.6 2.6 0 0 0 2.3-3.9l-4.6-8V3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M7.7 14.2h8.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="10.8" cy="17.2" r="1" fill="currentColor"/><circle cx="13.8" cy="15.6" r=".7" fill="currentColor"/></svg>Routines${crumb ? ` <span class="crumb">/ ${esc(crumb)}</span>` : ''}</a>
   <nav class="navlinks">
+    <div class="themesw" role="group" aria-label="Theme">
+      <button type="button" class="themebtn" data-set="classic" title="Classic theme"><span class="sw sw-classic"></span><span class="tlab">Classic</span></button>
+      <button type="button" class="themebtn" data-set="dreamlabs" title="Dream Labs theme"><span class="sw sw-dl"></span><span class="tlab">Dream Labs</span></button>
+    </div>
     <a class="navlink" href="/access">Access &amp; keys</a>
     <a class="navlink" href="/new">+ New routine</a>
   </nav>
 </header>
 ${inner}
-</div></body></html>`;
+</div>
+<script>(function(){var K='dlTheme';function sync(){var t='classic';try{if(localStorage.getItem(K)==='dreamlabs')t='dreamlabs';}catch(e){}var bs=document.querySelectorAll('.themebtn');for(var i=0;i<bs.length;i++)bs[i].classList.toggle('on',bs[i].getAttribute('data-set')===t);}
+document.addEventListener('click',function(e){var b=e.target.closest?e.target.closest('.themebtn'):null;if(!b)return;var t=b.getAttribute('data-set');if(t==='dreamlabs')document.documentElement.setAttribute('data-theme','dreamlabs');else document.documentElement.removeAttribute('data-theme');try{localStorage.setItem(K,t);}catch(e){}sync();});sync();})();</script>
+</body></html>`;
 }
 
 function triggerLabel(t) {

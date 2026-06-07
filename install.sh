@@ -29,7 +29,7 @@ set -euo pipefail
 if [ "$(uname)" = "Darwin" ]; then
   SELFDIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd || echo /tmp)"
   if [ -f "$SELFDIR/install-macos.sh" ]; then exec bash "$SELFDIR/install-macos.sh" "$@"; fi
-  exec bash -c "$(curl -fsSL "${DL_SOURCE:-https://raw.githubusercontent.com/RubiconTwilly/dreamlabs-agent-server/main}/install-macos.sh")" "$@"
+  exec bash -c "$(curl -fsSL "${DL_SOURCE:-https://get.joindreamlabs.com}/install-macos.sh")" "$@"
 fi
 
 if [ "$(id -u)" -ne 0 ]; then echo "This installer needs root (Linux). Re-running with sudo..."; exec sudo -E bash "$0" "$@"; fi
@@ -41,8 +41,8 @@ DL_SECRETS="$DL_SECRETS_DIR/secrets.env"
 SVC_USER=dreamlabs
 AGENT_USER=dreamlabs-agent
 AGENT_HOME=/home/$AGENT_USER
-REPO_RAW="${DL_SOURCE:-https://raw.githubusercontent.com/RubiconTwilly/dreamlabs-agent-server/main}"
-UPDATE_URL="${DL_UPDATE_URL:-https://raw.githubusercontent.com/RubiconTwilly/dreamlabs-agent-server/main}"
+REPO_RAW="${DL_SOURCE:-https://get.joindreamlabs.com}"
+UPDATE_URL="${DL_UPDATE_URL:-https://get.joindreamlabs.com}"
 STARTER_DEFAULT="https://github.com/RubiconTwilly/dreamlabs-agent-starter"
 SELFDIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd || echo /tmp)"
 
@@ -302,3 +302,5 @@ echo "  +-----------------------------------------------------------"
 [ "$NCHOICE" = tailscale ] && echo "  (Reachable once 'tailscale up' is authorised and your device is on the tailnet.)"
 [ "$NCHOICE" = local ] && echo "  (Remote box? Reach it with:  ssh -L $DASH_PORT:localhost:$DASH_PORT user@host )"
 [ "$AUTH" = oauth ] && [ "$PROVIDER" != claude ] && warn "Finish OAuth if you skipped it: sudo -u $AGENT_USER $PROVIDER login  (see above)"
+# Auto-open the dashboard if this box has a desktop browser (no-op on headless servers).
+command -v xdg-open >/dev/null 2>&1 && xdg-open "$LINK" >/dev/null 2>&1 || true
