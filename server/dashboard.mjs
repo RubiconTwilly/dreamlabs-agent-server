@@ -58,6 +58,17 @@ function configuredProviders(extra) {
   return list;
 }
 
+// Dream Labs template agents. Public repos, so they clone even before GitHub is
+// connected. Picking one fills the repo + a starting prompt. "Or use your own repo."
+const TEMPLATES = [
+  { id: 'starter', name: 'Agent Starter', repo: 'RubiconTwilly/dreamlabs-agent-starter',
+    desc: 'A clean, well-structured agent brain: SOUL, brand voice, business context, drafts folder. The best blank canvas.',
+    instructions: 'Read the SOUL and routine-prompt in this repo. Each run, do the task described there, write outputs to the drafts folder, and report a short summary of what you did.' },
+  { id: 'blueprint', name: 'Business Blueprint', repo: 'RubiconTwilly/dreamlabsblueprint',
+    desc: 'Generates and maintains a business blueprint from intake answers. Good base for a research / report agent.',
+    instructions: 'Using the blueprint structure in this repo, refresh the report from the latest inputs. Flag anything that changed since the last run.' },
+];
+
 // Connector catalog - tutorials are baked in (the customer wires these on their end).
 const CONNECTORS = [
   { id: 'gmail', name: 'Gmail', icon: '📧', steps: [
@@ -329,6 +340,14 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 .subtab{font-size:12.5px;color:var(--subtle);padding:7px 12px;border-radius:9px;cursor:pointer;border:1px solid transparent}
 .subtab.on{background:var(--surface-2);color:var(--ink);border-color:var(--border);font-weight:540}
 .subtab .badge{display:inline-block;min-width:16px;text-align:center;background:var(--surface-3);border-radius:6px;font-size:10.5px;padding:0 4px;margin-left:5px;color:var(--muted)}
+.tpl-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
+.tpl{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface-1);padding:13px 14px;cursor:pointer;transition:all .1s ease}
+.tpl:hover{background:var(--surface-2);border-color:var(--border-strong)}
+.tpl.on{border-color:var(--accent);background:var(--accent-soft)}
+.tpl-name{font-weight:560;font-size:13.5px}
+.tpl-desc{font-size:12px;color:var(--subtle);margin-top:4px;line-height:1.45}
+.tpl-repo{font-family:var(--mono);font-size:11px;color:var(--tertiary);margin-top:7px}
+@media(max-width:640px){.tpl-grid{grid-template-columns:1fr}}
 .conn-chips{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:14px}
 .connchip{display:inline-flex;align-items:center;gap:7px;font-size:13px;background:var(--surface-2);border:1px solid var(--border);border-radius:9px;padding:8px 12px;cursor:pointer;transition:all .1s}
 .connchip:hover{background:var(--surface-3)}
@@ -466,6 +485,14 @@ function formPage(r, prefill) {
     <label class="field"><span class="lab">Name <span class="req">*</span></span>
       <input name="name" required maxlength="60" value="${esc(r.name || '')}" placeholder="e.g., Daily code review" autofocus></label>
 
+    ${isEdit ? '' : `<div class="field"><span class="lab">Start from a Dream Labs template <span class="hint">or use your own repo below</span></span>
+      <div class="tpl-grid">
+        ${TEMPLATES.map(t => `<div class="tpl" onclick='useTemplate(${JSON.stringify(t).replace(/'/g, "&#39;")})'>
+          <div class="tpl-name">${esc(t.name)}</div>
+          <div class="tpl-desc">${esc(t.desc)}</div>
+          <div class="tpl-repo">${esc(t.repo)}</div></div>`).join('')}
+      </div></div>`}
+
     <label class="field"><span class="lab">Instructions</span>
       <div class="instr-wrap">
         <textarea name="instructions" placeholder="Describe what the agent should do in each session">${esc(instr || '')}</textarea>
@@ -544,6 +571,15 @@ function formPage(r, prefill) {
     function syncModels(p){var s=document.querySelector('select[name=model]');var ms=MODELS[p]||MODELS.claude;
       s.innerHTML=ms.map(function(m){return '<option value="'+m+'">'+(m||'Default model')+'</option>'}).join('');}
     pickTrig('${esc(t.type)}');pickSub('connectors');
+    // Apply a Dream Labs template: fill the repo + a starting prompt + name hint.
+    function useTemplate(t){
+      var repo=document.getElementById('repo'); if(repo) repo.value=t.repo;
+      var ins=document.querySelector('textarea[name=instructions]'); if(ins && !ins.value.trim()) ins.value=t.instructions||'';
+      var nm=document.querySelector('input[name=name]'); if(nm && !nm.value.trim()) nm.value=t.name;
+      document.querySelectorAll('.tpl').forEach(function(e){e.classList.remove('on')});
+      if(window.event&&window.event.currentTarget) window.event.currentTarget.classList.add('on');
+      if(repo) repo.scrollIntoView({block:'center'});
+    }
     // Populate the repo picker from the connected GitHub account.
     fetch('/api/github/repos').then(function(r){return r.json()}).then(function(d){
       var inp=document.getElementById('repo'), dl=document.getElementById('repolist');
