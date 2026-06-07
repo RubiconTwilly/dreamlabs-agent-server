@@ -441,7 +441,34 @@ legend{font-size:12px;color:var(--subtle);font-weight:560;padding:0 8px}
 .cred{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid var(--border)}
 .cred:last-child{border-bottom:0}
 .mono-sm{font-family:var(--mono);font-size:12px;color:var(--muted);word-break:break-all}
-@media(max-width:640px){.grid2,.grid3{grid-template-columns:1fr}}
+/* calendar (month grid) */
+.cal-head{display:flex;align-items:center;justify-content:space-between;margin:6px 0 12px;flex-wrap:wrap;gap:10px}
+.cal-month{font-size:15px;font-weight:600;color:var(--muted)}
+.cal{background:var(--surface-1);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden}
+.cal-wd{display:grid;grid-template-columns:repeat(7,1fr);background:var(--surface-2);border-bottom:1px solid var(--border)}
+.cal-wd div{padding:9px 11px;font-size:10px;font-weight:600;letter-spacing:.1em;color:var(--subtle)}
+.cal-wd .cal-wend{color:var(--tertiary)}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);grid-auto-rows:minmax(116px,1fr)}
+.cal-cell{border-right:1px solid var(--border);border-bottom:1px solid var(--border);padding:6px 6px 8px;display:flex;flex-direction:column;gap:4px;min-height:0;overflow:hidden}
+.cal-cell:nth-child(7n){border-right:0}
+.cal-grid>.cal-cell:nth-last-child(-n+7){border-bottom:0}
+.cal-out{background:rgba(0,0,0,.16)} .cal-out .cal-n{color:var(--tertiary)}
+.cal-past{opacity:.4}
+.cal-today{background:linear-gradient(180deg,var(--accent-soft),transparent 65%);box-shadow:inset 0 0 0 1.5px rgba(201,100,66,.5)}
+.cal-dn{display:flex;align-items:center;justify-content:space-between;min-height:21px}
+.cal-n{font-size:12px;font-weight:600;color:var(--muted);width:21px;height:21px;display:flex;align-items:center;justify-content:center;border-radius:50%}
+.cal-today .cal-n{background:var(--accent);color:#fff}
+.cal-now{font-size:8.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
+.cal-runtag{font-size:9px;color:var(--tertiary);font-family:var(--mono)}
+.cal-ev{display:flex;flex-direction:column;gap:3px;min-height:0}
+.cal-chip{display:flex;align-items:center;gap:5px;text-decoration:none;background:var(--surface-2);border:1px solid var(--border);border-left:2px solid var(--subtle);border-radius:5px;padding:2px 6px;font-size:10.5px;color:var(--ink);overflow:hidden}
+.cal-chip:hover{background:var(--surface-3);border-color:var(--border-strong)}
+.cal-t{font-family:var(--mono);font-size:9px;color:var(--subtle);flex:0 0 auto}
+.cal-x{font-family:var(--mono);font-size:9px;font-weight:700;color:var(--canvas);background:var(--muted);border-radius:4px;padding:0 4px;flex:0 0 auto}
+.cal-nm{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cal-more{font-size:10px;color:var(--subtle);padding:1px 6px}
+.cal-chip.p-claude{border-left-color:var(--accent)} .cal-chip.p-codex{border-left-color:var(--green)} .cal-chip.p-grok{border-left-color:var(--amber)} .cal-chip.p-gemini{border-left-color:#6ea8e0} .cal-chip.p-deepseek{border-left-color:#9b7fe0} .cal-chip.p-api{border-left-color:var(--subtle)}
+@media(max-width:640px){.grid2,.grid3{grid-template-columns:1fr} .cal-grid{grid-auto-rows:minmax(76px,1fr)} .cal-nm{display:none}}
 `;
 
 function layout(title, inner, crumb) {
@@ -502,35 +529,58 @@ function cronMatches(cron, d) {
   return cronFieldMatch(mi, d.getMinutes(), 0, 59) && cronFieldMatch(ho, d.getHours(), 0, 23)
     && cronFieldMatch(mo, d.getMonth() + 1, 1, 12) && dayOk;
 }
-function upcomingRuns(routines, days = 7) {
-  const scheduled = routines.filter(r => !r.paused && r.trigger?.type === 'schedule' && r.trigger.cron);
-  const out = []; if (!scheduled.length) return out;
-  const start = new Date(); start.setSeconds(0, 0); start.setMinutes(start.getMinutes() + 1);
-  const cap = {};
-  for (let i = 0; i < days * 24 * 60 && out.length < 400; i++) {
-    const d = new Date(start.getTime() + i * 60000);
-    for (const r of scheduled) {
-      if ((cap[r.id] || 0) >= 40) continue;
-      if (cronMatches(r.trigger.cron, d)) { out.push({ id: r.id, name: r.name, provider: r.provider, time: new Date(d) }); cap[r.id] = (cap[r.id] || 0) + 1; }
-    }
-  }
-  return out.sort((a, b) => a.time - b.time);
+// Month grid (Google-Calendar style). High-frequency routines collapse to "x N".
+function monthGrid(year, month) {
+  const first = new Date(year, month, 1);
+  const start = new Date(first); start.setDate(1 - first.getDay()); // back to the Sunday
+  return Array.from({ length: 42 }, (_, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d; });
 }
-function calendarBody() {
+function dayRuns(routines, day) {
+  const out = [];
+  for (const r of routines) {
+    if (r.paused || r.trigger?.type !== 'schedule' || !r.trigger.cron) continue;
+    let count = 0, first = null;
+    for (let m = 0; m < 1440; m++) { const d = new Date(day); d.setHours(0, m, 0, 0); if (cronMatches(r.trigger.cron, d)) { count++; if (!first) first = new Date(d); if (count >= 200) break; } }
+    if (count) out.push({ id: r.id, name: r.name, provider: r.provider, count, first });
+  }
+  return out;
+}
+const PROV_DOT = { claude: 'p-claude', codex: 'p-codex', grok: 'p-grok', gemini: 'p-gemini', deepseek: 'p-deepseek', api: 'p-api' };
+function calendarBody(mo = 0) {
   const { routines } = readRoutines();
-  const runs = upcomingRuns(routines, 7);
-  if (!runs.length) return `<div class="card"><div class="empty"><div class="big">No scheduled runs in the next 7 days</div><div>Give a routine a Schedule trigger and it shows up here.</div></div></div>`;
-  const groups = {};
-  for (const r of runs) { const k = r.time.toDateString(); (groups[k] = groups[k] || []).push(r); }
-  const today = new Date().toDateString(), tom = new Date(Date.now() + 864e5).toDateString();
-  const dayLabel = k => k === today ? 'Today' : k === tom ? 'Tomorrow' : new Date(k).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  const now = new Date();
+  const base = new Date(now.getFullYear(), now.getMonth() + mo, 1);
+  const M = base.getMonth();
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const monthName = base.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   const fmt = d => d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-  return Object.entries(groups).map(([k, items]) => `
-    <div class="sectlabel" style="margin-top:18px">${esc(dayLabel(k))} <span class="tert" style="text-transform:none;letter-spacing:0">· ${items.length} run${items.length > 1 ? 's' : ''}</span></div>
-    <div class="card">${items.map(it => `<div class="runrow"><span><b>${esc(fmt(it.time))}</b> &nbsp; ${esc(it.name)} <span class="tert">· ${esc(PROVIDER_LABEL[it.provider] || it.provider)}</span></span><a class="btn ghost sm" href="/routine/${esc(it.id)}">Open</a></div>`).join('')}</div>`).join('');
+  const wd = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map((w, i) => `<div class="${i === 0 || i === 6 ? 'cal-wend' : ''}">${w}</div>`).join('');
+  const grid = monthGrid(base.getFullYear(), M).map(d => {
+    const inMonth = d.getMonth() === M, isToday = d.getTime() === today.getTime(), isPast = d < today;
+    let chips = '', tag = '';
+    if (!isPast) {
+      const runs = dayRuns(routines, d);
+      if (runs.length) {
+        const total = runs.reduce((a, r) => a + r.count, 0);
+        tag = `<span class="cal-runtag">${total} run${total > 1 ? 's' : ''}</span>`;
+        chips = runs.slice(0, 3).map(r => {
+          const badge = r.count > 1 ? `<span class="cal-x">x${r.count}</span>` : `<span class="cal-t">${esc(fmt(r.first))}</span>`;
+          return `<a class="cal-chip ${PROV_DOT[r.provider] || 'p-api'}" href="/routine/${esc(r.id)}">${badge}<span class="cal-nm">${esc(r.name)}</span></a>`;
+        }).join('');
+        if (runs.length > 3) chips += `<span class="cal-more">+${runs.length - 3} more</span>`;
+      }
+    }
+    return `<div class="cal-cell${inMonth ? '' : ' cal-out'}${isToday ? ' cal-today' : ''}${isPast ? ' cal-past' : ''}">
+      <div class="cal-dn"><span class="cal-n">${d.getDate()}</span>${isToday ? '<span class="cal-now">today</span>' : tag}</div>
+      <div class="cal-ev">${chips}</div></div>`;
+  }).join('');
+  return `<div class="cal-head"><div class="cal-month">${esc(monthName)}</div>
+      <div class="row-actions"><a class="btn ghost sm" href="/?view=calendar&mo=${mo - 1}">‹</a><a class="btn ghost sm" href="/?view=calendar">Today</a><a class="btn ghost sm" href="/?view=calendar&mo=${mo + 1}">›</a></div></div>
+    <div class="cal"><div class="cal-wd">${wd}</div><div class="cal-grid">${grid}</div></div>
+    <p class="hint" style="margin-top:10px">High-frequency routines collapse to <b>x N</b> per day. Each chip links to its routine.</p>`;
 }
 
-function pageList(view) {
+function pageList(view, mo) {
   const isCal = view === 'calendar';
   const { routines } = readRoutines();
   const rows = routines.map(r => {
@@ -567,7 +617,7 @@ function pageList(view) {
     <a class="tab ${isCal ? '' : 'on'}" href="/">All</a>
     <a class="tab ${isCal ? 'on' : ''}" href="/?view=calendar">Calendar</a>
   </div></div>
-  ${isCal ? calendarBody() : `<div class="card">${rows || `<div class="empty"><div class="big">No routines yet</div><div>Create one and it runs on your own server, on your schedule.</div><div style="margin-top:16px"><a class="btn" href="/new">+ New routine</a></div></div>`}</div>`}`;
+  ${isCal ? calendarBody(mo || 0) : `<div class="card">${rows || `<div class="empty"><div class="big">No routines yet</div><div>Create one and it runs on your own server, on your schedule.</div><div style="margin-top:16px"><a class="btn" href="/new">+ New routine</a></div></div>`}</div>`}`;
   return layout('Routines', body);
 }
 
@@ -1021,7 +1071,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (method === 'GET') {
-    if (path === '/') return send(res, 200, pageList(url.searchParams.get('view')));
+    if (path === '/') return send(res, 200, pageList(url.searchParams.get('view'), parseInt(url.searchParams.get('mo') || '0', 10) || 0));
     if (path === '/new') return send(res, 200, formPage(null, url.searchParams.get('prefill') || ''));
     if (path === '/access') return send(res, 200, await accessPage());
     if (path === '/providers') return send(res, 200, providersPage());
