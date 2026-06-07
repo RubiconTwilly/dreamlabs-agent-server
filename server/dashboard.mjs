@@ -12,7 +12,7 @@
 // Visual language matches the Claude routines UI: warm flat-dark, white primary
 // buttons, docked pickers, big trigger rows, connector chips, amber callouts.
 import http from 'node:http';
-import { readFileSync, writeFileSync, existsSync, readdirSync, renameSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, renameSync, mkdirSync, openSync } from 'node:fs';
 import { spawn, execFileSync } from 'node:child_process';
 import { timingSafeEqual, createHmac, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -120,6 +120,67 @@ function writeRoutines(obj) {
 function getRoutine(id) { return readRoutines().routines.find(r => r.id === id); }
 function providerStatus() { return readJSON(PROVIDERS_FILE, {}); }
 function updateStatus() { return readJSON(UPDATE_STATUS, null); }
+// ---- provider connect: all click, no terminal. OAuth via spawned device-flow ----
+// login commands per provider. oauth caches in HOME (the jail reuses it on this
+// local box); claude prints a token we capture into keys.env.
+const PROVIDER_LOGIN = {
+  codex: { cmd: ['codex', 'login', '--device-auth'], oauth: true },
+  grok: { cmd: ['grok', 'auth', 'login'], oauth: true },
+  claude: { cmd: ['claude', 'setup-token'], oauth: true, captureToken: 'CLAUDE_CODE_OAUTH_TOKEN' },
+};
+// key-paste: which env var (+ base) a pasted API key maps to.
+const PROVIDER_KEY = {
+  claude: { key: 'ANTHROPIC_API_KEY' }, codex: { key: 'OPENAI_API_KEY' },
+  grok: { key: 'XAI_API_KEY' }, gemini: { key: 'GEMINI_API_KEY' },
+  deepseek: { key: 'OPENAI_API_KEY', base: 'https://api.deepseek.com' },
+  api: { key: 'OPENAI_API_KEY' },
+};
+const KEYS_ENV = join(DATA, 'keys.env'); // runner sources this (dashboard-writable, cross-platform)
+const connectLog = p => join(DATA, `connect-${p}.log`);
+const connectStatusFile = p => join(DATA, `connect-${p}.status.json`);
+const connectStatus = p => readJSON(connectStatusFile(p), null);
+
+function setProviderConnected(prov, on, makeDefault) {
+  const ps = providerStatus(); ps[prov] = !!on; ps.updatedAt = nowISO();
+  if (on && (makeDefault || !ps.default)) ps.default = prov;
+  if (!on && ps.default === prov) ps.default = Object.keys(ps).find(k => k !== 'default' && k !== 'updatedAt' && ps[k]) || '';
+  try { writeFileSync(PROVIDERS_FILE, JSON.stringify(ps, null, 2)); } catch {}
+}
+function writeKeyEnv(name, val, extra) {
+  let cur = ''; try { cur = readFileSync(KEYS_ENV, 'utf8'); } catch {}
+  const drop = new Set([name, ...(extra ? Object.keys(extra) : [])]);
+  const lines = cur.split('\n').filter(l => l && !drop.has(l.split('=')[0]));
+  lines.push(`${name}=${val}`);
+  if (extra) for (const [k, v] of Object.entries(extra)) lines.push(`${k}=${v}`);
+  writeFileSync(KEYS_ENV, lines.join('\n') + '\n', { mode: 0o600 });
+}
+// Spawn the provider's login flow; the dashboard captures its device code/URL and
+// watches for completion. The user only approves in their browser.
+function startProviderConnect(prov) {
+  const spec = PROVIDER_LOGIN[prov]; if (!spec) return false;
+  writeFileSync(connectLog(prov), '');
+  writeFileSync(connectStatusFile(prov), JSON.stringify({ state: 'pending', at: nowISO() }));
+  let child;
+  try {
+    const fd = openSync(connectLog(prov), 'a');
+    child = spawn(spec.cmd[0], spec.cmd.slice(1), { stdio: ['ignore', fd, fd], detached: true });
+  } catch { writeFileSync(connectStatusFile(prov), JSON.stringify({ state: 'failed', error: 'could not start (CLI installed?)' })); return false; }
+  child.on('error', () => { try { writeFileSync(connectStatusFile(prov), JSON.stringify({ state: 'failed', error: 'CLI not found' })); } catch {} });
+  child.on('exit', (code) => {
+    if (code === 0) {
+      if (spec.captureToken) {
+        try { const out = readFileSync(connectLog(prov), 'utf8'); const m = out.match(/sk-ant-[A-Za-z0-9_-]{20,}|[A-Za-z0-9_-]{40,}/); if (m) writeKeyEnv(spec.captureToken, m[0]); } catch {}
+      }
+      setProviderConnected(prov, true);
+      try { writeFileSync(connectStatusFile(prov), JSON.stringify({ state: 'connected', at: nowISO() })); } catch {}
+    } else {
+      try { writeFileSync(connectStatusFile(prov), JSON.stringify({ state: 'failed', code, at: nowISO() })); } catch {}
+    }
+  });
+  child.unref();
+  return true;
+}
+
 function githubStatus() { return readJSON(GITHUB_JSON, { connected: false }); }
 function readGithubToken() { try { return readFileSync(GITHUB_TOKEN_FILE, 'utf8').trim(); } catch { return ''; } }
 // Call the GitHub API with the stored token. Returns parsed JSON, {error} on HTTP error, or null if not connected.
@@ -736,6 +797,73 @@ function githubPage(opts) {
   return layout('Connect GitHub', body, 'Connect GitHub');
 }
 
+// Providers: connect more, swap the default, all by click. (Bash connects the first.)
+function providersPage() {
+  const ps = providerStatus();
+  const rows = PROVIDERS.map(p => {
+    const on = !!ps[p];
+    const isDefault = ps.default === p;
+    return `<div class="cred">
+      <span>${esc(PROVIDER_LABEL[p])} ${isDefault ? '<span class="pill live" style="margin-left:6px">default</span>' : ''}</span>
+      <span class="row-actions">${on
+        ? `${isDefault ? '' : `<form method="post" action="/provider/default/${p}"><button class="btn ghost sm">Make default</button></form>`}
+           <a class="btn ghost sm" href="/provider/${p}">Manage</a>`
+        : `<a class="btn sm" href="/provider/${p}">Connect</a>`}</span></div>`;
+  }).join('');
+  const body = `
+    <a class="back" href="/access">< Access &amp; keys</a>
+    <h2 class="title">AI providers</h2>
+    <p class="lede">Connect as many as you like and switch the default. Each agent can use any connected provider. Your first one was set up during install.</p>
+    <div class="card">${rows}</div>`;
+  return layout('AI providers', body, 'AI providers');
+}
+
+// Connect one provider: OAuth (spawned device flow, you just approve) or paste a key.
+function providerConnectPage(prov, opts) {
+  const ps = providerStatus();
+  const on = !!ps[prov];
+  const st = connectStatus(prov);
+  const canOauth = !!PROVIDER_LOGIN[prov];
+  const canKey = !!PROVIDER_KEY[prov];
+  const log = (() => { try { return readFileSync(connectLog(prov), 'utf8'); } catch { return ''; } })();
+  const linkMatch = log.match(/https?:\/\/\S+/);
+  let main;
+  if (st && st.state === 'pending') {
+    main = `<div class="card" style="padding:18px">
+      <div class="r-name" style="margin-bottom:10px">Waiting for you to approve in your browser…</div>
+      ${linkMatch ? `<a class="btn" href="${esc(linkMatch[0])}" target="_blank">Open the approval page</a>` : ''}
+      <div class="log" style="margin-top:14px">${esc(log || 'Starting…')}</div>
+      <p class="hint" style="margin-top:10px">This page checks every few seconds. Approve with your ${esc(PROVIDER_LABEL[prov])} account and it connects itself.</p>
+    </div>`;
+  } else if (on) {
+    main = `<div class="card" style="padding:16px 18px"><div class="cred" style="border:0;padding:0">
+      <span>Connected${ps.default === prov ? ' <span class="pill live">default</span>' : ''}</span>
+      <span class="row-actions">
+        ${ps.default === prov ? '' : `<form method="post" action="/provider/default/${prov}"><button class="btn ghost sm">Make default</button></form>`}
+        <form method="post" action="/provider/disconnect/${prov}"><button class="btn ghost sm">Disconnect</button></form>
+      </span></div></div>`;
+  } else {
+    const failed = st && st.state === 'failed' ? `<div class="warn">⚠️ <div>Last attempt failed${st.error ? ': ' + esc(st.error) : ''}. Make sure the ${esc(PROVIDER_LABEL[prov])} CLI is installed, then retry.</div></div>` : '';
+    main = `${failed}<div class="card" style="padding:18px">
+      ${canOauth ? `<form method="post" action="/provider/connect/${prov}"><button class="btn">Connect ${esc(PROVIDER_LABEL[prov])} (sign in)</button>
+        <span class="hint" style="margin-left:10px">Opens an approval page. No terminal.</span></form>` : ''}
+      ${canOauth && canKey ? '<div style="height:14px"></div>' : ''}
+      ${canKey ? `<form class="stack" method="post" action="/provider/key/${prov}" style="gap:10px;margin-top:0">
+        <label class="field"><span class="lab">…or paste an API key</span>
+          <input name="key" type="password" placeholder="${esc(PROVIDER_KEY[prov].key)}" autocomplete="off" required></label>
+        ${prov === 'api' ? '<label class="field"><span class="lab">Base URL</span><input name="base" placeholder="https://api.openai.com"></label>' : ''}
+        <div class="row-actions"><button class="btn ghost" type="submit">Save key</button></div></form>` : ''}
+    </div>`;
+  }
+  const refresh = (st && st.state === 'pending') ? '<meta http-equiv="refresh" content="3">' : '';
+  const body = `${refresh}
+    <a class="back" href="/providers">< AI providers</a>
+    <h2 class="title">${esc(PROVIDER_LABEL[prov])}</h2>
+    <p class="lede">Connect by signing in (we run the flow, you just approve) or paste a key. Connecting adds it; your other providers stay.</p>
+    ${main}`;
+  return layout('Connect ' + PROVIDER_LABEL[prov], body, esc(PROVIDER_LABEL[prov]));
+}
+
 // "See your keys" - STATUS + access link only. Never prints provider secrets.
 async function accessPage() {
   const st = providerStatus();
@@ -787,9 +915,9 @@ async function accessPage() {
     <p class="hint" style="margin-top:10px">This link is your password - anyone with it controls your agents. Bookmark it, keep it private. To rotate: change <code>DASH_TOKEN</code> in <code>/etc/dreamlabs/secrets.env</code> and restart the service.</p>
   </div>
 
-  <div class="sectlabel">Provider connections</div>
+  <div class="sectlabel">AI providers</div>
   <div class="card">${provRows}</div>
-  <p class="hint" style="margin-top:10px">Add or change a provider key: edit <code>/etc/dreamlabs/secrets.env</code> (chmod 600, never web-served) and run <code>dreamlabs reconfigure</code>, or re-run the installer. The dashboard only ever sees whether a key is present, never its value.</p>
+  <p class="hint" style="margin-top:10px"><a href="/providers">Connect more providers or swap the default</a> - all by click, no terminal. Your first provider was set up during install.</p>
 
   <div class="sectlabel">Source control</div>
   <div class="card">${ghRow}</div>
@@ -896,6 +1024,11 @@ const server = http.createServer(async (req, res) => {
     if (path === '/') return send(res, 200, pageList(url.searchParams.get('view')));
     if (path === '/new') return send(res, 200, formPage(null, url.searchParams.get('prefill') || ''));
     if (path === '/access') return send(res, 200, await accessPage());
+    if (path === '/providers') return send(res, 200, providersPage());
+    if (path.startsWith('/provider/')) {
+      const p = path.slice('/provider/'.length);
+      return PROVIDERS.includes(p) ? send(res, 200, providerConnectPage(p)) : send(res, 404, layout('Not found', '<div class="empty">Unknown provider</div>'));
+    }
     if (path === '/github') return send(res, 200, githubPage());
     // Repo list for the agent form's picker (reads the stored token).
     if (path === '/api/github/repos') {
@@ -921,6 +1054,22 @@ const server = http.createServer(async (req, res) => {
     if (path === '/update') {
       requestUpdate();
       return redirect(res, '/access');
+    }
+    // Provider connect (OAuth spawn / key paste / default / disconnect) - all click.
+    if (path.startsWith('/provider/')) {
+      const m = path.match(/^\/provider\/(connect|key|default|disconnect)\/([a-z]+)$/);
+      if (m) {
+        const [, act, prov] = m;
+        if (!PROVIDERS.includes(prov)) return send(res, 404, layout('Not found', '<div class="empty">Unknown provider</div>'));
+        if (act === 'connect') { startProviderConnect(prov); return redirect(res, '/provider/' + prov); }
+        if (act === 'key') {
+          const key = (f.key || '').trim(); const spec = PROVIDER_KEY[prov];
+          if (key && spec) { const extra = (prov === 'api' && f.base) ? { API_BASE_URL: f.base.trim() } : (spec.base ? { API_BASE_URL: spec.base } : null); writeKeyEnv(spec.key, key, extra); setProviderConnected(prov, true); }
+          return redirect(res, '/provider/' + prov);
+        }
+        if (act === 'default') { setProviderConnected(prov, true, true); return redirect(res, '/providers'); }
+        if (act === 'disconnect') { setProviderConnected(prov, false); return redirect(res, '/providers'); }
+      }
     }
     // Connect GitHub: validate the PAT, then store it (600) + the login (no token).
     if (path === '/github/connect') {

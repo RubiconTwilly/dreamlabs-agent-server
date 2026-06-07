@@ -39,6 +39,8 @@ case "$TRIGGER" in cron|manual|api|webhook) ;; *) echo "invalid trigger: $TRIGGE
 set -a
 # shellcheck disable=SC1090
 source "$DL_SECRETS"
+# Keys connected later from the dashboard (click) land here, dreamlabs-writable.
+[ -f "$DL_DATA/keys.env" ] && source "$DL_DATA/keys.env"
 set +a
 
 ROUTINES="$DL_DATA/routines.json"
