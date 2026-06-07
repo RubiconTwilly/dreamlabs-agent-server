@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Dream Labs Agent Server — provider runner with loop contracts.
+# Dream Labs Agent Server - provider runner with loop contracts.
 #
 # Usage: run-agent.sh <routine-id> [trigger]     trigger: cron | manual | api | webhook
 #
@@ -17,7 +17,7 @@ DL_SECRETS="${DL_SECRETS:-/etc/dreamlabs/secrets.env}"
 ID="${1:?usage: run-agent.sh <routine-id> [trigger]}"
 TRIGGER="${2:-cron}"
 
-# Strict id validation — this value touches file paths and jq filters.
+# Strict id validation - this value touches file paths and jq filters.
 [[ "$ID" =~ ^[a-z0-9][a-z0-9-]{0,39}$ ]] || { echo "invalid routine id: $ID" >&2; exit 2; }
 case "$TRIGGER" in cron|manual|api|webhook) ;; *) echo "invalid trigger: $TRIGGER" >&2; exit 2 ;; esac
 
@@ -102,14 +102,14 @@ if [ "$PAUSED" = "true" ] && [ "$TRIGGER" != "manual" ]; then
   exit 0
 fi
 
-# Gate 2: failure streak. Belt-and-braces — post-run logic should already have paused it.
+# Gate 2: failure streak. Belt-and-braces - post-run logic should already have paused it.
 FAILS_BEFORE="$(trailing_failures)"
 if [ "$FAILS_BEFORE" -ge "$MAX_FAILS" ] && [ "$TRIGGER" != "manual" ]; then
   set_paused
   exit 0
 fi
 
-# Gate 3: daily volume cap (manual runs exempt — a human is watching).
+# Gate 3: daily volume cap (manual runs exempt - a human is watching).
 if [ "$TRIGGER" != "manual" ]; then
   N_TODAY="$(runs_today)"
   if [ "${N_TODAY:-0}" -ge "$MAX_RUNS_DAY" ]; then

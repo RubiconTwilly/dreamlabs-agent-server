@@ -1,7 +1,7 @@
 # Dream Labs Agent Server
 
 Self-hosted, bring-your-own-AI agent routines. One bash command stands up a
-routines-style dashboard on the customer's own VPS — their repo, their brain,
+routines-style dashboard on the customer's own VPS - their repo, their brain,
 their API key (Claude / Codex / any model), any schedule including sub-hourly.
 
 This is **Track B** from `DREAMLABS-AGENT-SERVER-SPEC.md`: the provider-agnostic
@@ -13,7 +13,7 @@ ownership track. Track A (Claude cloud routines) stays the default for everyone.
 curl -fsSL https://get.joindreamlabs.com/install.sh | bash
 ```
 
-The installer asks four things — provider, auth, repo, how you'll reach it — then:
+The installer asks four things - provider, auth, repo, how you'll reach it - then:
 installs deps, creates two locked-down users, clones your repo, writes secrets
 **outside any web root**, hardens the box, starts the dashboard, wires cron, does a
 test fire, and prints your private dashboard link.
@@ -43,12 +43,12 @@ Host it at e.g. `get.joindreamlabs.com` or open it locally.
 - **Routines dashboard** matching the Claude routines UX: create an agent, give it
   instructions, pick a model + trigger (Schedule / GitHub event / API), add
   connectors. Run now, pause, see every run's logs.
-- **Loop contracts** on every routine — timeout, daily cap, and auto-pause after N
+- **Loop contracts** on every routine - timeout, daily cap, and auto-pause after N
   consecutive failures (with an alert). This is what keeps unattended agents from
   becoming background chaos.
-- **Connectors with baked-in tutorials** — Gmail, Telegram, Slack, GitHub, Notion.
+- **Connectors with baked-in tutorials** - Gmail, Telegram, Slack, GitHub, Notion.
   The dashboard shows the step-by-step; the wiring happens on the customer's box.
-- **Access & keys page** — your bookmarkable dashboard link (your password) and a
+- **Access & keys page** - your bookmarkable dashboard link (your password) and a
   read-only view of which providers are connected. Key *values* are never shown.
 
 ## Components
@@ -57,7 +57,7 @@ Host it at e.g. `get.joindreamlabs.com` or open it locally.
 |---|---|
 | `install.sh` | one-command installer + hardening |
 | `server/dashboard.mjs` | single-file dashboard (Node builtins only, binds 127.0.0.1) |
-| `server/run-agent.sh` | provider runner — enforces the loop contract |
+| `server/run-agent.sh` | provider runner - enforces the loop contract |
 | `server/agent-jail.sh` | runs the AI CLI as a jailed user with an env allowlist |
 | `server/api-call.mjs` | raw-API runner (any OpenAI-compatible / Anthropic key) |
 | `workspace-seed/` | sample SOUL + mcp.json for the agent workspace |
@@ -65,17 +65,17 @@ Host it at e.g. `get.joindreamlabs.com` or open it locally.
 
 ## Security model (the $6k rules, baked in)
 
-1. **Explicit routes only — unknown path → 404. No static-file fallback, ever.**
+1. **Explicit routes only - unknown path → 404. No static-file fallback, ever.**
    (`/secrets.env` returns 404. This is the exact rule the original loss broke.)
 2. **Secrets live in `/etc/dreamlabs/secrets.env`** (`640 root:dreamlabs`), outside any
    served directory. The dashboard process never reads them.
-3. **The agent runs jailed** — a separate `dreamlabs-agent` user with an env
+3. **The agent runs jailed** - a separate `dreamlabs-agent` user with an env
    allowlist, not in the `dreamlabs` group, so it cannot read the secrets file it
    runs under. A prompt-injected agent still can't exfiltrate keys.
-4. **No common ports** (49152–65535, random) and **not open to the world** —
+4. **No common ports** (49152–65535, random) and **not open to the world** -
    Tailscale-only by default, or firewalled to one IP.
 5. **Token auth** on every route except `/health`; the access link is the password.
-6. **Least privilege** — dashboard/cron run as `dreamlabs` (non-root); systemd
+6. **Least privilege** - dashboard/cron run as `dreamlabs` (non-root); systemd
    `ProtectSystem=strict`, `NoNewPrivileges`, `PrivateTmp`.
 
 ## CLI

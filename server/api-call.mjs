@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Dream Labs Agent Server — raw-API runner.
+// Dream Labs Agent Server - raw-API runner.
 // The most portable provider: a single HTTP call with the routine's
-// instructions. No agentic tools, no file edits — output goes to the run log.
+// instructions. No agentic tools, no file edits - output goes to the run log.
 //
 // Usage: api-call.mjs <instructions-file> [model]
 // Env (allowlisted by agent-jail.sh): ANTHROPIC_API_KEY | OPENAI_API_KEY, API_BASE_URL?

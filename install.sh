@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Dream Labs Agent Server — one-command installer.
+# Dream Labs Agent Server - one-command installer.
 #
 #   curl -fsSL https://get.joindreamlabs.com/install.sh | bash
 #   # or, pre-filled by the setup wizard:
@@ -9,11 +9,11 @@
 # agent jail + dashboard + cron + self-update, hardened by default.
 #
 # Privilege separation:
-#   dreamlabs        — service user: runs the dashboard + cron, owns routines/runs
-#   dreamlabs-agent  — jailed user: runs the AI CLI, CANNOT read secrets.env
-#   secrets.env      — root:dreamlabs 640, outside any web root, never served
+#   dreamlabs        - service user: runs the dashboard + cron, owns routines/runs
+#   dreamlabs-agent  - jailed user: runs the AI CLI, CANNOT read secrets.env
+#   secrets.env      - root:dreamlabs 640, outside any web root, never served
 #
-# Wizard env vars (all optional — anything unset is prompted for):
+# Wizard env vars (all optional - anything unset is prompted for):
 #   DL_PROVIDER  claude|codex|grok|gemini|deepseek|api
 #   DL_AUTH      oauth|key
 #   DL_MODEL     a model id (or blank for default)
@@ -48,7 +48,7 @@ randport(){ echo $(( (RANDOM % 16000) + 49152 )); }
 have(){ command -v "$1" >/dev/null 2>&1; }
 
 say "Dream Labs Agent Server installer"
-echo "  Own your whole agent stack — any model, your keys, sub-hourly schedules."
+echo "  Own your whole agent stack - any model, your keys, sub-hourly schedules."
 
 # ----- 1. dependencies -----
 say "Installing dependencies"
@@ -148,7 +148,7 @@ if git clone --depth 1 "$CLONE_URL" "$DL_APP/workspace" >/dev/null 2>&1; then
   fi
   ok "cloned $REPO"
 else
-  warn "clone failed — seeding a workspace with a sample SOUL"; mkdir -p "$DL_APP/workspace"
+  warn "clone failed - seeding a workspace with a sample SOUL"; mkdir -p "$DL_APP/workspace"
   fetch workspace-seed/SOUL.md "$DL_APP/workspace/SOUL.md" 2>/dev/null || echo "# Agent brain" > "$DL_APP/workspace/SOUL.md"
   fetch workspace-seed/mcp.json "$DL_APP/workspace/mcp.json" 2>/dev/null || true
 fi
@@ -178,7 +178,7 @@ say "Writing secrets (640 root:$SVC_USER, never web-served)"
 DASH_TOKEN="$(randhex 24)"; WEBHOOK_SECRET="$(randhex 16)"; DASH_URL="http://$HOST_FOR_URL:$DASH_PORT"
 umask 077
 cat > "$DL_SECRETS" <<EOF
-# Dream Labs Agent Server secrets — chmod 640 root:$SVC_USER. NEVER commit / web-serve.
+# Dream Labs Agent Server secrets - chmod 640 root:$SVC_USER. NEVER commit / web-serve.
 PROVIDER=$PROVIDER
 DEFAULT_MODEL=$MODEL
 ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
@@ -293,7 +293,7 @@ case "\${1:-}" in
   url)         grep ^DASH_URL= \$S|cut -d= -f2- ;;
   restart)     systemctl restart dreamlabs-dashboard; echo restarted ;;
   logs)        journalctl -u dreamlabs-dashboard -n 50 --no-pager ;;
-  update)      systemctl start dreamlabs-update.service; echo "update started — dreamlabs logs-update" ;;
+  update)      systemctl start dreamlabs-update.service; echo "update started - dreamlabs logs-update" ;;
   logs-update) journalctl -u dreamlabs-update.service -n 50 --no-pager ;;
   run)         sudo -u $SVC_USER $DL_APP/bin/run-agent.sh "\$2" manual ;;
   reconfigure) systemctl restart dreamlabs-dashboard; echo "reloaded secrets" ;;
@@ -305,13 +305,13 @@ chmod +x /usr/local/bin/dreamlabs
 # ----- 12. test fire + finish -----
 if [ -s "$DL_DATA/routines.json" ] && [ "$(jq '.routines|length' "$DL_DATA/routines.json" 2>/dev/null||echo 0)" -gt 0 ]; then
   say "Test fire"; FIRST="$(jq -r '.routines[0].id' "$DL_DATA/routines.json")"
-  sudo -u "$SVC_USER" "$DL_APP/bin/run-agent.sh" "$FIRST" manual >/dev/null 2>&1 && ok "ran '$FIRST'" || warn "test run nonzero — check the dashboard"
+  sudo -u "$SVC_USER" "$DL_APP/bin/run-agent.sh" "$FIRST" manual >/dev/null 2>&1 && ok "ran '$FIRST'" || warn "test run nonzero - check the dashboard"
 fi
 
 LINK="$DASH_URL/?token=$DASH_TOKEN"
-say "Done — v$(cat "$DL_APP/VERSION" 2>/dev/null)"
+say "Done - v$(cat "$DL_APP/VERSION" 2>/dev/null)"
 echo "  ┌────────────────────────────────────────────────────────────"
-echo "  │  Your dashboard (this link is your password — keep it private):"
+echo "  │  Your dashboard (this link is your password - keep it private):"
 echo "  │    $LINK"
 echo "  │  Anytime:  dreamlabs link · logs · update · restart"
 echo "  └────────────────────────────────────────────────────────────"

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Dream Labs Agent Server — dashboard service.
+// Dream Labs Agent Server - dashboard service.
 //
 // Single file, Node builtins only. Hardened to the $6k rules:
 //   - binds 127.0.0.1 only (reach it via Tailscale or a firewalled reverse proxy)
@@ -27,7 +27,7 @@ const PUBLIC_URL = process.env.DASH_URL || '';
 const ROUTINES_FILE = join(DATA, 'routines.json');
 const RUNS_FILE = join(DATA, 'runs.jsonl');
 const RUNS_DIR = join(DATA, 'runs');
-const PROVIDERS_FILE = join(DATA, 'providers.json'); // {claude:bool,...} — STATUS only, no secrets
+const PROVIDERS_FILE = join(DATA, 'providers.json'); // {claude:bool,...} - STATUS only, no secrets
 const VERSION_FILE = join(APP, 'VERSION');
 const UPDATE_FLAG = join(DATA, '.update-requested');   // dashboard writes; root systemd path applies
 const UPDATE_STATUS = join(DATA, 'update-status.json'); // root updater writes; dashboard reads
@@ -56,7 +56,7 @@ function configuredProviders(extra) {
   return list;
 }
 
-// Connector catalog — tutorials are baked in (the customer wires these on their end).
+// Connector catalog - tutorials are baked in (the customer wires these on their end).
 const CONNECTORS = [
   { id: 'gmail', name: 'Gmail', icon: '📧', steps: [
     'In Google Cloud Console, create OAuth credentials (Desktop app) and enable the Gmail API.',
@@ -408,7 +408,7 @@ function pageList() {
 
   const body = `
   <div class="flex-between">
-    <div><h2 class="title">Routines</h2><p class="lede">Templated agents that run on a schedule, by API, or on a GitHub event — on your box, your keys, any model.</p></div>
+    <div><h2 class="title">Routines</h2><p class="lede">Templated agents that run on a schedule, by API, or on a GitHub event - on your box, your keys, any model.</p></div>
     <a class="btn" href="/new">+ New routine</a>
   </div>
   <form method="get" action="/new"><input class="promptbox" name="prefill" placeholder="What do you want automated?" autocomplete="off"></form>
@@ -427,7 +427,7 @@ function connectorsTab(enabled) {
     `<details class="tut"><summary>${c.icon} How to connect ${esc(c.name)}</summary><ol>${c.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol></details>`
   ).join('');
   return `<div class="conn-chips">${chips}</div>
-    <div class="warn">⚠️ <div>Connected tools can be used by the agent during runs — including writes — without asking. Only enable what this routine needs. Setup happens on your box; the step-by-step is below.</div></div>
+    <div class="warn">⚠️ <div>Connected tools can be used by the agent during runs - including writes - without asking. Only enable what this routine needs. Setup happens on your box; the step-by-step is below.</div></div>
     <div style="margin-top:14px"><div class="hint" style="margin-bottom:8px">Setup guides (baked in)</div>${tuts}</div>`;
 }
 
@@ -479,7 +479,7 @@ function formPage(r, prefill) {
       </div>
       <div class="trig-config" id="tc-schedule" style="display:none">
         <label class="field" style="margin-top:12px"><span class="lab">Cron expression</span>
-          <span class="hint">Any interval — sub-hourly is the whole point of self-hosting. <code>*/15 * * * *</code> = every 15 min.</span>
+          <span class="hint">Any interval - sub-hourly is the whole point of self-hosting. <code>*/15 * * * *</code> = every 15 min.</span>
           <input name="cron" value="${esc(t.cron || '0 9 * * *')}" placeholder="0 9 * * *"></label>
       </div>
       <div class="trig-config" id="tc-api" style="display:none"><p class="contract-note" style="margin-top:12px">Trigger with <code>POST ${esc(PUBLIC_URL || '<dashboard-url>')}/api/trigger/&lt;id&gt;</code> and header <code>Authorization: Bearer &lt;token&gt;</code> (your access key).</p></div>
@@ -494,7 +494,7 @@ function formPage(r, prefill) {
       </div>
       <div class="sub" id="sub-connectors">${connectorsTab(r.connectors)}</div>
       <div class="sub" id="sub-behavior" style="display:none">
-        <label class="field"><span class="lab">Extra behavior notes</span><span class="hint">Optional. Tone, output format, escalation preferences — prepended to the agent each run.</span>
+        <label class="field"><span class="lab">Extra behavior notes</span><span class="hint">Optional. Tone, output format, escalation preferences - prepended to the agent each run.</span>
           <textarea name="behavior" placeholder="e.g., Always post the digest to Telegram. Keep summaries under 5 bullets.">${esc(r.behavior || '')}</textarea></label>
       </div>
       <div class="sub" id="sub-permissions" style="display:none">
@@ -510,7 +510,7 @@ function formPage(r, prefill) {
         <label class="field"><span class="lab">Max fails → pause</span><input name="maxConsecutiveFailures" type="number" min="1" max="20" value="${esc(c.maxConsecutiveFailures ?? 2)}"></label>
         <label class="field"><span class="lab">Max runs / day</span><input name="maxRunsPerDay" type="number" min="1" max="2000" value="${esc(c.maxRunsPerDay ?? 96)}"></label>
       </div>
-      <p class="contract-note" style="margin-top:12px">The agent is stopped at the timeout, auto-paused after the failure limit (you get an alert), and skips once it hits the daily cap. Loop-contract discipline — no background chaos.</p>
+      <p class="contract-note" style="margin-top:12px">The agent is stopped at the timeout, auto-paused after the failure limit (you get an alert), and skips once it hits the daily cap. Loop-contract discipline - no background chaos.</p>
     </fieldset>
 
     <div class="formfoot">
@@ -584,7 +584,7 @@ function detailPage(r) {
   return layout(r.name, body, esc(r.name));
 }
 
-// "See your keys" — STATUS + access link only. Never prints provider secrets.
+// "See your keys" - STATUS + access link only. Never prints provider secrets.
 async function accessPage() {
   const st = providerStatus();
   const remote = await fetchRemoteVersion();
@@ -594,7 +594,7 @@ async function accessPage() {
   let softwareBody;
   if (us && us.state === 'running') {
     softwareBody = `<div class="cred"><span>Updating…</span><span class="pill"><span class="dotmark"></span>in progress</span></div>
-      <p class="hint" style="margin:12px 16px">${esc(us.message || 'Applying update…')} The dashboard will restart in a moment — refresh shortly.</p>`;
+      <p class="hint" style="margin:12px 16px">${esc(us.message || 'Applying update…')} The dashboard will restart in a moment - refresh shortly.</p>`;
   } else {
     const statusLine = us && us.state === 'error'
       ? `<p class="hint" style="margin:10px 16px;color:var(--red)">Last update failed: ${esc(us.message || '')}</p>`
@@ -619,7 +619,7 @@ async function accessPage() {
   const body = `
   <a class="back" href="/">← All routines</a>
   <h2 class="title">Access &amp; keys</h2>
-  <p class="lede">Everything you need to reach this dashboard and confirm your providers are wired up. Provider keys are never shown here — the web process never loads them into its environment; only the runner reads them.</p>
+  <p class="lede">Everything you need to reach this dashboard and confirm your providers are wired up. Provider keys are never shown here - the web process never loads them into its environment; only the runner reads them.</p>
 
   <div class="sectlabel">Your dashboard access link</div>
   <div class="card" style="padding:16px 18px">
@@ -627,7 +627,7 @@ async function accessPage() {
     <div class="row-actions" style="margin-top:12px">
       <button class="btn ghost sm" onclick="navigator.clipboard.writeText(document.getElementById('lnk').textContent);this.textContent='Copied'">Copy link</button>
     </div>
-    <p class="hint" style="margin-top:10px">This link is your password — anyone with it controls your agents. Bookmark it, keep it private. To rotate: change <code>DASH_TOKEN</code> in <code>/etc/dreamlabs/secrets.env</code> and restart the service.</p>
+    <p class="hint" style="margin-top:10px">This link is your password - anyone with it controls your agents. Bookmark it, keep it private. To rotate: change <code>DASH_TOKEN</code> in <code>/etc/dreamlabs/secrets.env</code> and restart the service.</p>
   </div>
 
   <div class="sectlabel">Provider connections</div>
@@ -636,7 +636,7 @@ async function accessPage() {
 
   <div class="sectlabel">Software</div>
   <div class="card">${softwareBody}</div>
-  <p class="hint" style="margin-top:10px">Updates pull the official release and restart the dashboard. The web app can only <i>request</i> an update — a separate root task applies it after validating the download, so a stolen access link can never run arbitrary code here.</p>
+  <p class="hint" style="margin-top:10px">Updates pull the official release and restart the dashboard. The web app can only <i>request</i> an update - a separate root task applies it after validating the download, so a stolen access link can never run arbitrary code here.</p>
 
   <div class="warn" style="margin-top:18px">⚠️ <div>Security model: this service binds to localhost and is reached over Tailscale or a firewalled proxy. It never loads or serves your provider keys (they're in a separate file only the runner reads), serves no files outside its routes, and runs the agent in a jail that masks the secrets file. These are the rules that keep a self-hosted agent box from leaking its own keys.</div></div>`;
   return layout('Access & keys', body, 'Access & keys');
@@ -700,7 +700,7 @@ const server = http.createServer(async (req, res) => {
     return send(res, 401, layout('Unauthorized', '<div class="empty"><div class="big">Invalid token</div></div>'));
   }
 
-  // API trigger — Bearer token.
+  // API trigger - Bearer token.
   if (path.startsWith('/api/trigger/') && method === 'POST') {
     if (!authed(req)) return json(res, 401, { error: 'unauthorized' });
     const id = path.slice('/api/trigger/'.length);
@@ -709,7 +709,7 @@ const server = http.createServer(async (req, res) => {
     return json(res, 202, { ok: true, triggered: id });
   }
 
-  // GitHub webhook — HMAC if WEBHOOK_SECRET set, else Bearer token.
+  // GitHub webhook - HMAC if WEBHOOK_SECRET set, else Bearer token.
   if (path.startsWith('/webhook/') && method === 'POST') {
     const id = path.slice('/webhook/'.length);
     if (!getRoutine(id)) return json(res, 404, { error: 'unknown routine' });
@@ -747,7 +747,7 @@ const server = http.createServer(async (req, res) => {
 
   if (method === 'POST') {
     const f = parseForm(await readBody(req));
-    // Request a self-update. The dashboard can only DROP A FLAG — a root systemd
+    // Request a self-update. The dashboard can only DROP A FLAG - a root systemd
     // path-unit validates and applies it. The web app never runs the update itself.
     if (path === '/update') {
       requestUpdate();

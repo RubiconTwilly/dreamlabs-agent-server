@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Dream Labs Agent Server — agent jail.
+# Dream Labs Agent Server - agent jail.
 #
 # Runs the AI provider CLI as the unprivileged `dreamlabs-agent` user with an
 # env allowlist. The agent gets ONLY PATH/HOME/TERM/LANG + the one provider's
@@ -10,7 +10,7 @@
 # OAuth note: each provider caches its OAuth session under the agent user's HOME
 # (~/.claude, ~/.codex/auth.json, ~/.grok/auth, ~/.gemini). HOME is preserved in
 # the allowlist, so a one-time `sudo -u dreamlabs-agent <cli> login` keeps
-# working unattended — without exposing the server's secrets file.
+# working unattended - without exposing the server's secrets file.
 #
 # Usage: agent-jail.sh <provider> <workspace> <instructions-file> [model]
 set -euo pipefail

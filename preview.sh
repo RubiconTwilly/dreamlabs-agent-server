@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local preview of the dashboard — no install, no cron, no root, fake data.
+# Local preview of the dashboard - no install, no cron, no root, fake data.
 # Run on your Mac:   bash preview.sh   then open the printed URL.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"

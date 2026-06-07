@@ -68,7 +68,7 @@ select:focus,input.txt:focus{outline:0;border-color:var(--accent);box-shadow:0 0
 <div class="wrap">
   <div class="brand"><span class="bolt">⚡</span> Dream Labs Agent Server</div>
   <h1>Set up your agent server</h1>
-  <p class="lede">Pick your stack. We'll generate one command you paste into a fresh Ubuntu box. Your keys are entered on your own server during install — never here.</p>
+  <p class="lede">Pick your stack. We'll generate one command you paste into a fresh Ubuntu box. Your keys are entered on your own server during install - never here.</p>
 
   <!-- 1. provider -->
   <div class="step">
@@ -115,10 +115,10 @@ select:focus,input.txt:focus{outline:0;border-color:var(--accent);box-shadow:0 0
       <option value="0 9 * * *">Daily at 9am</option>
       <option value="0 9 * * 1-5">Weekday mornings (9am)</option>
     </select>
-    <div class="hint">Sub-hourly is the whole point of self-hosting — cloud routines can't go below 1 hour.</div>
+    <div class="hint">Sub-hourly is the whole point of self-hosting - cloud routines can't go below 1 hour.</div>
   </div>
 
-  <div class="warn">⚠️ <div>This command contains <b>no secrets</b> — only your choices. You'll paste your API key or do the OAuth step on your own server during install.</div></div>
+  <div class="warn">⚠️ <div>This command contains <b>no secrets</b> - only your choices. You'll paste your API key or do the OAuth step on your own server during install.</div></div>
 
   <!-- generated command -->
   <div class="cmdwrap">
@@ -131,22 +131,22 @@ select:focus,input.txt:focus{outline:0;border-color:var(--accent);box-shadow:0 0
 </div>
 
 <script>
-// Provider matrix — model IDs + auth current as of June 2026 (see AUDIT.md).
+// Provider matrix - model IDs + auth current as of June 2026 (see AUDIT.md).
 // type 'cli' = native agent CLI; type 'api' = generic OpenAI-compatible runner.
 const PROVIDERS = [
-  { id:'claude', icon:'◆', name:'Claude Code', tag:'Anthropic — closest to the routines feel', type:'cli',
+  { id:'claude', icon:'◆', name:'Claude Code', tag:'Anthropic - closest to the routines feel', type:'cli',
     auth:['oauth','key'], models:['claude-opus-4-8','claude-sonnet-4-6','claude-haiku-4-5'],
     oauthCmd:'claude setup-token', keyName:'ANTHROPIC_API_KEY' },
   { id:'codex', icon:'⬡', name:'OpenAI Codex', tag:'GPT / Codex via the Codex CLI', type:'cli',
     auth:['oauth','key'], models:['gpt-5.3-codex','gpt-5.4-mini'],
     oauthCmd:'codex login --device-auth', keyName:'OPENAI_API_KEY' },
-  { id:'grok', icon:'✦', name:'xAI Grok', tag:'Grok 4.3 — official Grok Build CLI', type:'cli',
+  { id:'grok', icon:'✦', name:'xAI Grok', tag:'Grok 4.3 - official Grok Build CLI', type:'cli',
     auth:['oauth','key'], models:['grok-4.3'],
     oauthCmd:'grok auth login', keyName:'XAI_API_KEY' },
-  { id:'gemini', icon:'✧', name:'Google Gemini', tag:'Gemini CLI — Google sign-in', type:'cli',
+  { id:'gemini', icon:'✧', name:'Google Gemini', tag:'Gemini CLI - Google sign-in', type:'cli',
     auth:['oauth','key'], models:['gemini-3.5-flash','gemini-3.1-pro-preview'],
     oauthCmd:'gemini → Sign in with Google', keyName:'GEMINI_API_KEY' },
-  { id:'deepseek', icon:'⬢', name:'DeepSeek', tag:'Cheap, capable — API key', type:'api',
+  { id:'deepseek', icon:'⬢', name:'DeepSeek', tag:'Cheap, capable - API key', type:'api',
     auth:['key'], models:['deepseek-v4-flash','deepseek-v4-pro'],
     keyName:'DeepSeek API key', base:'https://api.deepseek.com' },
   { id:'api', icon:'⚙', name:'Any API', tag:'Any OpenAI-compatible endpoint', type:'api',

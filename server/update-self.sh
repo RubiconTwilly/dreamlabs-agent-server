@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Dream Labs Agent Server — self-updater. Runs as ROOT via the dreamlabs-update
+# Dream Labs Agent Server - self-updater. Runs as ROOT via the dreamlabs-update
 # systemd service (triggered either by the .update-requested flag from the
 # dashboard, or by `dreamlabs update` on the CLI).
 #
 # Trust model: this script only ever pulls from the PINNED update URL baked into
 # secrets.env at install time (DL_UPDATE_URL). The web dashboard can REQUEST an
 # update (drop a flag file) but cannot change what gets pulled or run arbitrary
-# code — it has no sudo (NoNewPrivileges). So a stolen dashboard token can at
+# code - it has no sudo (NoNewPrivileges). So a stolen dashboard token can at
 # most trigger "fetch the official repo and restart", not RCE.
 set -euo pipefail
 
@@ -37,16 +37,16 @@ trap 'rm -rf "$TMP"' EXIT
 FILES="server/run-agent.sh server/agent-jail.sh server/api-call.mjs server/dashboard.mjs server/update-self.sh VERSION"
 for rel in $FILES; do
   if ! curl -fsSL "$URL/$rel" -o "$TMP/$(basename "$rel")"; then
-    log "fetch failed: $rel"; status "error" "Failed to fetch $rel — kept current version." "$(cat "$DL_APP/VERSION" 2>/dev/null||echo '')"
+    log "fetch failed: $rel"; status "error" "Failed to fetch $rel - kept current version." "$(cat "$DL_APP/VERSION" 2>/dev/null||echo '')"
     exit 1
   fi
 done
 
 # Sanity-gate before swapping anything in: JS must parse, shell must parse.
-node --check "$TMP/dashboard.mjs" || { log "dashboard.mjs failed parse"; status "error" "Downloaded dashboard failed validation — no changes applied." ""; exit 1; }
-node --check "$TMP/api-call.mjs"  || { log "api-call.mjs failed parse"; status "error" "Downloaded api-call failed validation — no changes applied." ""; exit 1; }
+node --check "$TMP/dashboard.mjs" || { log "dashboard.mjs failed parse"; status "error" "Downloaded dashboard failed validation - no changes applied." ""; exit 1; }
+node --check "$TMP/api-call.mjs"  || { log "api-call.mjs failed parse"; status "error" "Downloaded api-call failed validation - no changes applied." ""; exit 1; }
 for s in run-agent.sh agent-jail.sh update-self.sh; do
-  bash -n "$TMP/$s" || { log "$s failed parse"; status "error" "Downloaded $s failed validation — no changes applied." ""; exit 1; }
+  bash -n "$TMP/$s" || { log "$s failed parse"; status "error" "Downloaded $s failed validation - no changes applied." ""; exit 1; }
 done
 
 NEWVER="$(cat "$TMP/VERSION" 2>/dev/null | tr -d ' \n' || echo '')"
@@ -58,6 +58,6 @@ install -m 0755 "$TMP/update-self.sh" "$DL_APP/bin/update-self.sh"
 install -m 0644 "$TMP/VERSION" "$DL_APP/VERSION"
 log "installed version $NEWVER, restarting dashboard"
 
-systemctl restart dreamlabs-dashboard || { status "error" "Updated files but dashboard restart failed — check: journalctl -u dreamlabs-dashboard" "$NEWVER"; exit 1; }
+systemctl restart dreamlabs-dashboard || { status "error" "Updated files but dashboard restart failed - check: journalctl -u dreamlabs-dashboard" "$NEWVER"; exit 1; }
 status "done" "Updated to $NEWVER." "$NEWVER"
 log "update complete: $NEWVER"
