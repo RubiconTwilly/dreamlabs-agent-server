@@ -417,7 +417,60 @@ function relTime(iso) {
   return Math.floor(d / 86400) + 'd ago';
 }
 
-function pageList() {
+// ---- minimal cron evaluation for the Calendar tab (standard 5-field crons) ----
+function cronFieldMatch(expr, val, min, max) {
+  if (expr === '*' || expr === '?') return true;
+  return expr.split(',').some(part => {
+    let step = 1, range = part;
+    if (part.includes('/')) { const [r, s] = part.split('/'); range = r; step = parseInt(s, 10) || 1; }
+    let lo, hi;
+    if (range === '*') { lo = min; hi = max; }
+    else if (range.includes('-')) { const [a, b] = range.split('-'); lo = parseInt(a, 10); hi = parseInt(b, 10); }
+    else { lo = hi = parseInt(range, 10); }
+    if (isNaN(lo) || isNaN(hi)) return false;
+    if (val < lo || val > hi) return false;
+    return ((val - lo) % step) === 0;
+  });
+}
+function cronMatches(cron, d) {
+  const f = (cron || '').trim().split(/\s+/); if (f.length < 5) return false;
+  const [mi, ho, dom, mo, dow] = f;
+  const domStar = dom === '*' || dom === '?', dowStar = dow === '*' || dow === '?';
+  const domM = cronFieldMatch(dom, d.getDate(), 1, 31), dowM = cronFieldMatch(dow, d.getDay(), 0, 6);
+  const dayOk = (!domStar && !dowStar) ? (domM || dowM) : (domM && dowM);
+  return cronFieldMatch(mi, d.getMinutes(), 0, 59) && cronFieldMatch(ho, d.getHours(), 0, 23)
+    && cronFieldMatch(mo, d.getMonth() + 1, 1, 12) && dayOk;
+}
+function upcomingRuns(routines, days = 7) {
+  const scheduled = routines.filter(r => !r.paused && r.trigger?.type === 'schedule' && r.trigger.cron);
+  const out = []; if (!scheduled.length) return out;
+  const start = new Date(); start.setSeconds(0, 0); start.setMinutes(start.getMinutes() + 1);
+  const cap = {};
+  for (let i = 0; i < days * 24 * 60 && out.length < 400; i++) {
+    const d = new Date(start.getTime() + i * 60000);
+    for (const r of scheduled) {
+      if ((cap[r.id] || 0) >= 40) continue;
+      if (cronMatches(r.trigger.cron, d)) { out.push({ id: r.id, name: r.name, provider: r.provider, time: new Date(d) }); cap[r.id] = (cap[r.id] || 0) + 1; }
+    }
+  }
+  return out.sort((a, b) => a.time - b.time);
+}
+function calendarBody() {
+  const { routines } = readRoutines();
+  const runs = upcomingRuns(routines, 7);
+  if (!runs.length) return `<div class="card"><div class="empty"><div class="big">No scheduled runs in the next 7 days</div><div>Give a routine a Schedule trigger and it shows up here.</div></div></div>`;
+  const groups = {};
+  for (const r of runs) { const k = r.time.toDateString(); (groups[k] = groups[k] || []).push(r); }
+  const today = new Date().toDateString(), tom = new Date(Date.now() + 864e5).toDateString();
+  const dayLabel = k => k === today ? 'Today' : k === tom ? 'Tomorrow' : new Date(k).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  const fmt = d => d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return Object.entries(groups).map(([k, items]) => `
+    <div class="sectlabel" style="margin-top:18px">${esc(dayLabel(k))} <span class="tert" style="text-transform:none;letter-spacing:0">· ${items.length} run${items.length > 1 ? 's' : ''}</span></div>
+    <div class="card">${items.map(it => `<div class="runrow"><span><b>${esc(fmt(it.time))}</b> &nbsp; ${esc(it.name)} <span class="tert">· ${esc(PROVIDER_LABEL[it.provider] || it.provider)}</span></span><a class="btn ghost sm" href="/routine/${esc(it.id)}">Open</a></div>`).join('')}</div>`).join('');
+}
+
+function pageList(view) {
+  const isCal = view === 'calendar';
   const { routines } = readRoutines();
   const rows = routines.map(r => {
     const lr = lastRun(r.id);
@@ -449,9 +502,11 @@ function pageList() {
   </div>
   <form method="get" action="/new"><input class="promptbox" name="prefill" placeholder="What do you want automated?" autocomplete="off"></form>
   <div class="chips">${chips}</div>
-  <div class="tabbar"><div class="tabs"><span class="tab on">All</span><span class="tab" title="coming soon">Calendar</span></div>
-    <span class="toggle">Include completed <span class="pill">soon</span></span></div>
-  <div class="card">${rows || `<div class="empty"><div class="big">No routines yet</div><div>Create one and it runs on your own server, on your schedule.</div><div style="margin-top:16px"><a class="btn" href="/new">+ New routine</a></div></div>`}</div>`;
+  <div class="tabbar"><div class="tabs">
+    <a class="tab ${isCal ? '' : 'on'}" href="/">All</a>
+    <a class="tab ${isCal ? 'on' : ''}" href="/?view=calendar">Calendar</a>
+  </div></div>
+  ${isCal ? calendarBody() : `<div class="card">${rows || `<div class="empty"><div class="big">No routines yet</div><div>Create one and it runs on your own server, on your schedule.</div><div style="margin-top:16px"><a class="btn" href="/new">+ New routine</a></div></div>`}</div>`}`;
   return layout('Routines', body);
 }
 
@@ -838,7 +893,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (method === 'GET') {
-    if (path === '/') return send(res, 200, pageList());
+    if (path === '/') return send(res, 200, pageList(url.searchParams.get('view')));
     if (path === '/new') return send(res, 200, formPage(null, url.searchParams.get('prefill') || ''));
     if (path === '/access') return send(res, 200, await accessPage());
     if (path === '/github') return send(res, 200, githubPage());
