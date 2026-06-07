@@ -34,7 +34,7 @@ const UPDATE_STATUS = join(DATA, 'update-status.json'); // root updater writes; 
 const UPDATE_URL = process.env.DL_UPDATE_URL || 'https://get.joindreamlabs.com';
 const GITHUB_TOKEN_FILE = join(DATA, 'github.token'); // 600, dreamlabs-owned. Read by dashboard (repo list) + runner (clone+push).
 const GITHUB_JSON = join(DATA, 'github.json');        // {connected, login} - no token
-const GITHUB_CLIENT_ID = process.env.DL_GITHUB_CLIENT_ID || ''; // Dream Labs OAuth App id (public) -> enables one-click device-flow connect
+const GITHUB_CLIENT_ID = process.env.DL_GITHUB_CLIENT_ID || 'Ov23lix1uyXcoGe6MsFi'; // Dream Labs OAuth App id (public) -> one-click device-flow connect
 const GITHUB_DEVICE = join(DATA, 'github-device.json'); // transient device-flow state
 const VERSION = (() => { try { return readFileSync(VERSION_FILE, 'utf8').trim(); } catch { return 'dev'; } })();
 const RUNNER = join(APP, 'bin', 'run-agent.sh');
