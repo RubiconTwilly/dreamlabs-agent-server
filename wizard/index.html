@@ -4,198 +4,208 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>Set up your Agent Server · Dream Labs</title>
+<title>Dream Labs Agent Setup</title>
 <style>
 :root{
-  --canvas:#1c1b19; --surface-1:#232220; --surface-2:#2b2926; --surface-3:#34322e;
-  --field:#2b2926; --border:rgba(255,255,255,.07); --border-strong:rgba(255,255,255,.14);
-  --ink:#f5f4f2; --muted:#c6c2bb; --subtle:#928d84; --tertiary:#6c675f;
-  --accent:#c96442; --accent-soft:rgba(201,100,66,.16); --white:#fafaf8; --green:#5cbb6e;
-  --warn-bg:rgba(224,169,72,.10); --warn-border:rgba(224,169,72,.28); --warn-ink:#e6b863;
-  --r-md:10px; --r-lg:14px; --r-xl:18px;
-  --font:"SF Pro Text",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-  --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,monospace;
+  --bg:#070a10; --bg2:#0c1422; --card:#0d131c; --card2:#111a26;
+  --border:rgba(255,255,255,.07); --border-on:rgba(242,119,47,.55);
+  --ink:#eef1f5; --muted:#9aa3b2; --subtle:#5f6b7d;
+  --orange:#f2772f; --orange-soft:rgba(242,119,47,.14); --teal:#5fb3c9;
+  --r:16px; --r-lg:20px;
+  --font:"SF Pro Display",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --mono:"SF Mono",ui-monospace,Menlo,monospace;
 }
 *{box-sizing:border-box}
-html,body{margin:0;padding:0}
-body{background:var(--canvas);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
-a{color:var(--accent)}
-code{font-family:var(--mono);font-size:.86em;background:rgba(255,255,255,.06);padding:1px 5px;border-radius:5px;color:var(--muted)}
-.wrap{max-width:760px;margin:0 auto;padding:40px 24px 120px}
-.brand{display:flex;align-items:center;gap:9px;font-weight:600;font-size:15px;margin-bottom:30px}
-.brand .bolt{color:var(--accent);font-size:18px}
-h1{font-size:27px;font-weight:600;letter-spacing:-.025em;margin:0 0 6px}
-.lede{color:var(--subtle);font-size:14px;margin:0 0 8px}
-.step{margin:34px 0}
-.steplab{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:600;color:var(--ink);margin-bottom:14px}
-.steplab .n{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--surface-3);color:var(--muted);font-size:12px}
-.steplab .opt{color:var(--tertiary);font-weight:450;font-size:11.5px}
-.cards{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.card{display:flex;gap:13px;align-items:flex-start;padding:15px 16px;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface-1);cursor:pointer;transition:all .12s ease}
-.card:hover{background:var(--surface-2);border-color:var(--border-strong)}
-.card.on{border-color:var(--accent);background:var(--accent-soft)}
-.card .ic{font-size:22px;line-height:1;width:26px;text-align:center}
-.card .t{font-weight:560;font-size:14px}
-.card .s{font-size:12px;color:var(--subtle);margin-top:3px}
-.card .badges{margin-top:7px;display:flex;gap:5px;flex-wrap:wrap}
-.badge{font-size:10px;font-weight:540;padding:2px 7px;border-radius:6px;background:var(--surface-3);color:var(--subtle);border:1px solid var(--border)}
-.badge.oauth{color:var(--green);border-color:rgba(92,187,110,.3)}
-.card input{display:none}
-.seg{display:flex;gap:8px}
-.seg label{flex:1}
-.seg .opt{display:block;text-align:center;padding:11px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface-1);cursor:pointer;font-size:13px;color:var(--muted);transition:all .12s}
-.seg input{display:none}
-.seg input:checked+.opt{border-color:var(--accent);background:var(--accent-soft);color:var(--ink);font-weight:540}
-.seg .opt .s{display:block;font-size:11px;color:var(--tertiary);margin-top:3px;font-weight:450}
-select,input.txt{background:var(--field);border:1px solid var(--border);border-radius:var(--r-md);color:var(--ink);font-family:inherit;font-size:14px;padding:11px 13px;width:100%}
-select:focus,input.txt:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
-.hint{font-size:11.5px;color:var(--tertiary);margin-top:7px}
-.warn{background:var(--warn-bg);border:1px solid var(--warn-border);border-radius:var(--r-md);padding:12px 14px;color:var(--warn-ink);font-size:12.5px;display:flex;gap:9px;margin-top:14px}
-.cmdwrap{position:sticky;bottom:0;margin-top:40px}
-.cmd{background:#141311;border:1px solid var(--border-strong);border-radius:var(--r-lg);padding:18px 18px 16px;font-family:var(--mono);font-size:12.5px;line-height:1.7;color:var(--ink);white-space:pre-wrap;word-break:break-all}
-.cmd .v{color:var(--accent)}
-.cmd .k{color:var(--subtle)}
-.cmdbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px}
-.btn{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 18px;border-radius:var(--r-md);background:var(--white);color:#1c1b19;font-weight:600;font-size:13px;border:0;cursor:pointer;font-family:inherit;transition:filter .12s}
-.btn:hover{filter:brightness(.93)}
-.next{font-size:12px;color:var(--subtle)}
-.next b{color:var(--muted);font-weight:540}
-.muted{color:var(--subtle)}
-@media(max-width:620px){.cards{grid-template-columns:1fr}}
+html,body{margin:0;padding:0;min-height:100%}
+body{
+  background:
+    radial-gradient(900px 500px at 50% -5%, #14233b 0%, rgba(20,35,59,0) 60%),
+    radial-gradient(700px 600px at 85% 20%, rgba(242,119,47,.06) 0%, rgba(0,0,0,0) 55%),
+    var(--bg);
+  color:var(--ink);font-family:var(--font);font-size:14px;-webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:660px;margin:0 auto;padding:48px 24px 90px;text-align:center}
+/* brand */
+.orb{width:96px;height:96px;margin:0 auto 22px;border-radius:50%;
+  background:radial-gradient(120% 120% at 35% 28%, #bfe3ef 0%, #6db6d6 32%, #3f7fc4 62%, #2a4a86 100%);
+  box-shadow:0 0 50px -6px rgba(95,179,201,.55), inset 0 -10px 24px rgba(0,0,0,.35);position:relative}
+.orb:after{content:"";position:absolute;inset:0;border-radius:50%;box-shadow:inset 0 8px 16px rgba(255,255,255,.25)}
+h1{font-size:30px;font-weight:800;letter-spacing:.16em;margin:0;text-transform:uppercase}
+h1 .o{color:var(--orange)}
+.tagline{color:var(--subtle);font-size:13px;letter-spacing:.04em;margin:8px 0 34px}
+/* stepper */
+.stepper{position:relative;margin:0 8px 26px;height:46px}
+.track{position:absolute;top:7px;left:6%;right:6%;height:3px;background:rgba(255,255,255,.08);border-radius:3px}
+.fill{position:absolute;top:7px;left:6%;height:3px;background:var(--orange);border-radius:3px;box-shadow:0 0 12px rgba(242,119,47,.6);transition:width .25s ease}
+.steps{display:flex;justify-content:space-between;position:relative}
+.stp{flex:1;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--subtle);font-weight:600;padding-top:18px}
+.stp.on{color:var(--orange)} .stp.done{color:var(--teal)}
+/* card */
+.card{background:linear-gradient(180deg, var(--card2) 0%, var(--card) 100%);border:1px solid var(--border);
+  border-radius:var(--r-lg);padding:36px 34px 30px;text-align:center;box-shadow:0 30px 80px -40px rgba(0,0,0,.9)}
+.eyebrow{color:var(--teal);font-size:12px;letter-spacing:.22em;text-transform:uppercase;font-weight:700;margin-bottom:10px}
+h2{font-size:27px;font-weight:800;letter-spacing:-.01em;margin:0 0 8px}
+h2 .o{color:var(--orange)}
+.sub{color:var(--muted);font-size:14px;margin:0 0 26px}
+.lab{display:block;text-align:left;color:var(--teal);font-size:11px;letter-spacing:.16em;text-transform:uppercase;font-weight:700;margin:0 0 9px}
+select,input.txt{width:100%;background:#0a1019;border:1px solid var(--border);border-radius:var(--r);color:var(--ink);
+  font-family:inherit;font-size:15px;padding:15px 16px;text-align:left;transition:border-color .15s, box-shadow .15s;appearance:none}
+select{cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%239aa3b2' stroke-width='1.3' fill='none'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 16px center}
+select:focus,input.txt:focus{outline:0;border-color:var(--border-on);box-shadow:0 0 0 4px var(--orange-soft)}
+.field{margin-bottom:20px;text-align:left}
+.hint{color:var(--subtle);font-size:12px;margin-top:8px;text-align:left}
+.seg{display:flex;gap:10px}
+.seg label{flex:1}.seg input{display:none}
+.seg .opt{display:block;text-align:center;padding:13px;border:1px solid var(--border);border-radius:var(--r);background:#0a1019;cursor:pointer;font-size:13.5px;color:var(--muted);transition:all .12s}
+.seg input:checked+.opt{border-color:var(--border-on);background:var(--orange-soft);color:var(--ink);font-weight:600}
+.seg .opt .s{display:block;font-size:11px;color:var(--subtle);margin-top:4px;font-weight:400}
+.badges{display:flex;gap:6px;justify-content:flex-start;margin-top:10px;flex-wrap:wrap}
+.badge{font-size:10px;font-weight:600;letter-spacing:.04em;padding:3px 8px;border-radius:6px;background:rgba(255,255,255,.05);color:var(--subtle);border:1px solid var(--border)}
+.badge.oauth{color:var(--teal);border-color:rgba(95,179,201,.35)}
+.warn{background:var(--orange-soft);border:1px solid rgba(242,119,47,.25);border-radius:var(--r);padding:12px 14px;color:#f0a878;font-size:12.5px;text-align:left;margin-top:6px}
+.cmd{background:#05080d;border:1px solid var(--border);border-radius:var(--r);padding:18px;font-family:var(--mono);font-size:12.5px;line-height:1.75;color:var(--ink);white-space:pre-wrap;word-break:break-all;text-align:left}
+.cmd .k{color:var(--subtle)} .cmd .v{color:var(--orange)}
+.nav{display:flex;justify-content:space-between;gap:12px;margin-top:26px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:46px;padding:0 24px;border-radius:var(--r);
+  background:var(--orange);color:#1a0f06;font-weight:700;font-size:14px;border:0;cursor:pointer;transition:filter .12s,transform .04s;font-family:inherit;letter-spacing:.02em}
+.btn:hover{filter:brightness(1.07)} .btn:active{transform:translateY(1px)}
+.btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}
+.btn.ghost:hover{color:var(--ink);border-color:var(--border-on)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.full{width:100%}
+.next-steps{text-align:left;color:var(--muted);font-size:13px;line-height:1.9;margin-top:6px}
+.next-steps b{color:var(--ink)}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="brand"><span class="bolt">⚡</span> Dream Labs Agent Server</div>
-  <h1>Set up your agent server</h1>
-  <p class="lede">Pick your stack. We'll generate one command you paste into a fresh Ubuntu box. Your keys are entered on your own server during install - never here.</p>
+  <div class="orb"></div>
+  <h1><span class="o">DREAM LABS</span> AGENT SETUP</h1>
+  <div class="tagline">Spin up your own agent server. Any model, your keys, your box.</div>
 
-  <!-- 1. provider -->
-  <div class="step">
-    <div class="steplab"><span class="n">1</span> Choose your AI</div>
-    <div class="cards" id="providers"></div>
-  </div>
-
-  <!-- 2. auth -->
-  <div class="step" id="authStep">
-    <div class="steplab"><span class="n">2</span> How will you sign in?</div>
-    <div class="seg" id="authSeg"></div>
-    <div class="hint" id="authHint"></div>
-  </div>
-
-  <!-- 3. model -->
-  <div class="step">
-    <div class="steplab"><span class="n">3</span> Default model <span class="opt">· can change per routine later</span></div>
-    <select id="model"></select>
-  </div>
-
-  <!-- 4. access -->
-  <div class="step">
-    <div class="steplab"><span class="n">4</span> How will you reach the dashboard?</div>
-    <div class="seg">
-      <label><input type="radio" name="access" value="local" checked><span class="opt">Local only<span class="s">This machine, localhost. No firewall. Lowest risk.</span></span></label>
-      <label><input type="radio" name="access" value="tailscale"><span class="opt">Tailscale<span class="s">Reach it privately from other devices.</span></span></label>
-      <label><input type="radio" name="access" value="firewall"><span class="opt">Firewall to my IP<span class="s">Open the port to one address.</span></span></label>
+  <div class="stepper">
+    <div class="track"></div><div class="fill" id="fill" style="width:0%"></div>
+    <div class="steps">
+      <div class="stp on" data-s="0">Provider</div>
+      <div class="stp" data-s="1">Setup</div>
+      <div class="stp" data-s="2">Install</div>
     </div>
   </div>
 
-  <div class="warn">⚠️ <div>This installs the <b>dashboard</b> only. You create agents from there, each with its own repo, schedule, and connectors. The command contains <b>no secrets</b>; you paste your key or sign in on your own machine during install.</div></div>
+  <div class="card">
+    <!-- STEP 1 -->
+    <section data-step="0">
+      <div class="eyebrow">Step 1 of 3</div>
+      <h2>Choose your <span class="o">AI Provider</span></h2>
+      <p class="sub">Which AI will power your agents?</p>
+      <div class="field">
+        <span class="lab">AI Provider</span>
+        <select id="provider" onchange="onProvider()"></select>
+        <div class="badges" id="provBadges"></div>
+      </div>
+      <div class="field" id="authField">
+        <span class="lab">Sign-in method</span>
+        <div class="seg" id="authSeg"></div>
+        <div class="hint" id="authHint"></div>
+      </div>
+      <div class="nav"><span></span><button class="btn" onclick="go(1)">Continue</button></div>
+    </section>
 
-  <!-- generated command -->
-  <div class="cmdwrap">
-    <div class="cmd" id="cmd"></div>
-    <div class="cmdbar">
-      <span class="next" id="next"></span>
-      <button class="btn" onclick="copyCmd(this)">Copy install command</button>
-    </div>
+    <!-- STEP 2 -->
+    <section data-step="1" hidden>
+      <div class="eyebrow">Step 2 of 3</div>
+      <h2>Server <span class="o">setup</span></h2>
+      <p class="sub">A couple of choices, then your command is ready.</p>
+      <div class="field">
+        <span class="lab">Default model</span>
+        <select id="model"></select>
+        <div class="hint">You can change this per agent later.</div>
+      </div>
+      <div class="field">
+        <span class="lab">How will you reach the dashboard?</span>
+        <div class="seg">
+          <label><input type="radio" name="access" value="local" checked onchange="state.access='local'"><span class="opt">Local only<span class="s">This machine. No firewall.</span></span></label>
+          <label><input type="radio" name="access" value="tailscale" onchange="state.access='tailscale'"><span class="opt">Tailscale<span class="s">Private, other devices.</span></span></label>
+          <label><input type="radio" name="access" value="firewall" onchange="state.access='firewall'"><span class="opt">Firewall<span class="s">One IP.</span></span></label>
+        </div>
+      </div>
+      <div class="nav"><button class="btn ghost" onclick="go(0)">Back</button><button class="btn" onclick="go(2)">Get my command</button></div>
+    </section>
+
+    <!-- STEP 3 -->
+    <section data-step="2" hidden>
+      <div class="eyebrow">Step 3 of 3</div>
+      <h2>Install on <span class="o">your server</span></h2>
+      <p class="sub">Paste this into a fresh Ubuntu box (or your Mac). No secrets in it.</p>
+      <div class="cmd" id="cmd"></div>
+      <button class="btn full" style="margin-top:14px" onclick="copyCmd(this)">Copy install command</button>
+      <div class="warn" style="margin-top:16px">You sign in to your provider during install (a quick approve step). Then open the dashboard link it prints and build agents by click.</div>
+      <div class="next-steps">
+        <div><b>1.</b> Run the command on your box.</div>
+        <div><b>2.</b> Approve your <span id="provName">provider</span> sign-in.</div>
+        <div><b>3.</b> Open your dashboard, connect GitHub, create your first agent.</div>
+      </div>
+      <div class="nav"><button class="btn ghost" onclick="go(1)">Back</button><span></span></div>
+    </section>
   </div>
 </div>
 
 <script>
-// Provider matrix - model IDs + auth current as of June 2026 (see AUDIT.md).
-// type 'cli' = native agent CLI; type 'api' = generic OpenAI-compatible runner.
 const PROVIDERS = [
-  { id:'claude', icon:'◆', name:'Claude Code', tag:'Anthropic - closest to the routines feel', type:'cli',
-    auth:['oauth','key'], models:['claude-opus-4-8','claude-sonnet-4-6','claude-haiku-4-5'],
-    oauthCmd:'claude setup-token', keyName:'ANTHROPIC_API_KEY' },
-  { id:'codex', icon:'⬡', name:'OpenAI Codex', tag:'GPT / Codex via the Codex CLI', type:'cli',
-    auth:['oauth','key'], models:['gpt-5.3-codex','gpt-5.4-mini'],
-    oauthCmd:'codex login --device-auth', keyName:'OPENAI_API_KEY' },
-  { id:'grok', icon:'✦', name:'xAI Grok', tag:'Grok 4.3 - official Grok Build CLI', type:'cli',
-    auth:['oauth','key'], models:['grok-4.3'],
-    oauthCmd:'grok auth login', keyName:'XAI_API_KEY' },
-  { id:'gemini', icon:'✧', name:'Google Gemini', tag:'Gemini CLI - Google sign-in', type:'cli',
-    auth:['oauth','key'], models:['gemini-3.5-flash','gemini-3.1-pro-preview'],
-    oauthCmd:'gemini → Sign in with Google', keyName:'GEMINI_API_KEY' },
-  { id:'deepseek', icon:'⬢', name:'DeepSeek', tag:'Cheap, capable - API key', type:'api',
-    auth:['key'], models:['deepseek-v4-flash','deepseek-v4-pro'],
-    keyName:'DeepSeek API key', base:'https://api.deepseek.com' },
-  { id:'api', icon:'⚙', name:'Any API', tag:'Any OpenAI-compatible endpoint', type:'api',
-    auth:['key'], models:[''], keyName:'API key', base:'' },
+  { id:'claude', name:'Claude Code (Anthropic)', auth:['oauth','key'], models:['claude-opus-4-8','claude-sonnet-4-6','claude-haiku-4-5'], oauthCmd:'claude setup-token', keyName:'ANTHROPIC_API_KEY' },
+  { id:'codex', name:'OpenAI Codex', auth:['oauth','key'], models:['gpt-5.3-codex','gpt-5.4-mini'], oauthCmd:'codex login', keyName:'OPENAI_API_KEY' },
+  { id:'grok', name:'xAI Grok', auth:['oauth','key'], models:['grok-4.3'], oauthCmd:'grok auth login', keyName:'XAI_API_KEY' },
+  { id:'gemini', name:'Google Gemini', auth:['oauth','key'], models:['gemini-3.5-flash','gemini-3.1-pro-preview'], oauthCmd:'gemini sign-in', keyName:'GEMINI_API_KEY' },
+  { id:'deepseek', name:'DeepSeek', auth:['key'], models:['deepseek-v4-flash','deepseek-v4-pro'], keyName:'DeepSeek API key' },
+  { id:'api', name:'Any OpenAI-compatible API', auth:['key'], models:[''], keyName:'API key' },
 ];
+let state = { provider:'claude', auth:'oauth', model:'', access:'local', step:0 };
+const byId = id => PROVIDERS.find(p=>p.id===id);
 
-let state = { provider:'claude', auth:'oauth', model:'', access:'local' };
-
-function provById(id){ return PROVIDERS.find(p=>p.id===id); }
-
-function renderProviders(){
-  document.getElementById('providers').innerHTML = PROVIDERS.map(p=>`
-    <label class="card ${state.provider===p.id?'on':''}" onclick="pickProvider('${p.id}')">
-      <span class="ic">${p.icon}</span>
-      <div><div class="t">${p.name}</div><div class="s">${p.tag}</div>
-        <div class="badges">${p.auth.map(a=>`<span class="badge ${a==='oauth'?'oauth':''}">${a==='oauth'?'OAuth / subscription':'API key'}</span>`).join('')}</div>
-      </div>
-    </label>`).join('');
+function fillProviders(){
+  document.getElementById('provider').innerHTML = '<option value="" disabled>Select your provider</option>' +
+    PROVIDERS.map(p=>`<option value="${p.id}" ${p.id===state.provider?'selected':''}>${p.name}</option>`).join('');
+  onProvider();
 }
-function renderAuth(){
-  const p = provById(state.provider);
-  if(!p.auth.includes(state.auth)) state.auth = p.auth[0];
-  const lab = { oauth:'OAuth / subscription', key:'API key' };
-  const sub = { oauth:'Use your existing plan. No per-token billing.', key:'Pay-per-token. Paste it during install.' };
-  document.getElementById('authSeg').innerHTML = p.auth.map(a=>`
-    <label><input type="radio" name="auth" value="${a}" ${state.auth===a?'checked':''} onchange="state.auth='${a}';render()">
-      <span class="opt">${lab[a]}<span class="s">${sub[a]}</span></span></label>`).join('');
-  document.getElementById('authStep').style.display = p.auth.length>1 ? 'block' : 'none';
-  const h = state.auth==='oauth'
-    ? `During install you'll run <code>${p.oauthCmd||'the login step'}</code> once on your server to authorise.`
-    : `During install you'll paste your <code>${p.keyName}</code>. It's stored in a root-only file the web app can't read.`;
-  document.getElementById('authHint').innerHTML = h;
+function onProvider(){
+  const sel=document.getElementById('provider'); if(sel.value) state.provider=sel.value;
+  const p=byId(state.provider);
+  document.getElementById('provBadges').innerHTML = p.auth.map(a=>`<span class="badge ${a==='oauth'?'oauth':''}">${a==='oauth'?'Sign in (OAuth)':'API key'}</span>`).join('');
+  if(!p.auth.includes(state.auth)) state.auth=p.auth[0];
+  const lab={oauth:'Sign in (subscription)',key:'API key'};
+  document.getElementById('authSeg').innerHTML = p.auth.map(a=>`<label><input type="radio" name="auth" value="${a}" ${state.auth===a?'checked':''} onchange="state.auth='${a}';authHint()"><span class="opt">${lab[a]}</span></label>`).join('');
+  document.getElementById('authField').style.display = p.auth.length>1 ? 'block':'none';
+  authHint();
 }
-function renderModels(){
-  const p = provById(state.provider);
-  const tiers = ['premium','balanced','cheap','extra'];
-  document.getElementById('model').innerHTML = p.models.map((m,i)=>
-    `<option value="${m}">${m||'Provider default'}${m&&p.models.length>1?'  ·  '+(tiers[i]||''):''}</option>`).join('');
-  state.model = p.models[0]||'';
+function authHint(){
+  const p=byId(state.provider);
+  document.getElementById('authHint').textContent = state.auth==='oauth'
+    ? 'During install you approve a sign-in for your existing plan. No per-token billing.'
+    : 'During install you paste your '+p.keyName+'. Stored in a root-only file the web app cannot read.';
+}
+function fillModels(){
+  const p=byId(state.provider);
+  document.getElementById('model').innerHTML = p.models.map(m=>`<option value="${m}">${m||'Provider default'}</option>`).join('');
+  state.model=p.models[0]||'';
+  document.getElementById('provName').textContent = p.name;
 }
 function buildCmd(){
-  const p = provById(state.provider);
-  const env = [];
-  env.push(['DL_PROVIDER', p.id]);                       // claude|codex|grok|gemini|deepseek|api
-  env.push(['DL_AUTH', p.auth.includes(state.auth)?state.auth:'key']);
-  if(state.model) env.push(['DL_MODEL', state.model]);
-  env.push(['DL_ACCESS', state.access]);
-  const envStr = env.map(([k,v])=>`<span class="k">${k}</span>=<span class="v">${v}</span>`).join(' \\\n  ');
-  return `curl -fsSL https://get.joindreamlabs.com/install.sh | \\\n  ${envStr} \\\n  bash`;
+  const p=byId(state.provider); const env=[];
+  env.push(['DL_PROVIDER',p.id]); env.push(['DL_AUTH', p.auth.includes(state.auth)?state.auth:'key']);
+  if(state.model) env.push(['DL_MODEL',state.model]); env.push(['DL_ACCESS',state.access]);
+  const s = env.map(([k,v])=>`<span class="k">${k}</span>=<span class="v">${v}</span>`).join(' \\\n  ');
+  document.getElementById('cmd').innerHTML = `curl -fsSL https://get.joindreamlabs.com/install.sh | \\\n  ${s} \\\n  bash`;
 }
-function renderNext(){
-  const p = provById(state.provider);
-  const host = state.access==='local' ? 'your machine (or a box you SSH into)' : 'a fresh Ubuntu box';
-  const steps = [];
-  steps.push(`run it on ${host}`);
-  steps.push(state.auth==='oauth' ? `sign in to <b>${p.name}</b>` : `paste your <b>${p.keyName}</b>`);
-  steps.push('open the dashboard, create your first agent');
-  document.getElementById('next').innerHTML = 'Next: ' + steps.map((s,i)=>`<b>${i+1}.</b> ${s}`).join(' &nbsp; ');
+function go(n){
+  state.step=n;
+  document.querySelectorAll('section[data-step]').forEach(s=>s.hidden = +s.dataset.step!==n);
+  document.querySelectorAll('.stp').forEach(e=>{const i=+e.dataset.s; e.classList.toggle('on',i===n); e.classList.toggle('done',i<n);});
+  document.getElementById('fill').style.width = (n/2*88+6)+'%';
+  if(n>=1) fillModels(); if(n>=2) buildCmd();
+  window.scrollTo({top:0,behavior:'smooth'});
 }
-function render(){ renderProviders(); renderAuth(); renderModels(); document.getElementById('cmd').innerHTML = buildCmd(); renderNext(); }
-function pickProvider(id){ state.provider=id; const p=provById(id); state.auth=p.auth[0]; render(); }
-function copyCmd(btn){
-  const txt = document.getElementById('cmd').innerText;
-  navigator.clipboard.writeText(txt).then(()=>{ const o=btn.textContent; btn.textContent='Copied ✓'; setTimeout(()=>btn.textContent=o,1500); });
-}
-document.getElementById('model').addEventListener('change', e=>{ state.model=e.target.value; document.getElementById('cmd').innerHTML=buildCmd(); });
-document.querySelectorAll('input[name=access]').forEach(r=>r.addEventListener('change', e=>{ state.access=e.target.value; document.getElementById('cmd').innerHTML=buildCmd(); }));
-render();
+function copyCmd(btn){ navigator.clipboard.writeText(document.getElementById('cmd').innerText).then(()=>{const o=btn.textContent;btn.textContent='Copied';setTimeout(()=>btn.textContent=o,1500);}); }
+fillProviders();
 </script>
 </body>
 </html>
