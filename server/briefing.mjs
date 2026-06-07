@@ -78,7 +78,7 @@ async function deliver() {
       const res = await fetch(cfg.DL_BRIEFING_URL, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: 'Bearer ' + (cfg.DL_BRIEFING_KEY || '') },
-        body: JSON.stringify({ boxId: cfg.DL_BOX_ID || '', generatedAt: briefing.generatedAt, summary: text, details }),
+        body: JSON.stringify({ type: 'briefing', boxId: cfg.DL_BOX_ID || '', generatedAt: briefing.generatedAt, summary: text, details }),
         signal: AbortSignal.timeout(10000),
       });
       console.log(res.ok ? 'delivered via Dream Labs relay' : 'DL relay HTTP ' + res.status);

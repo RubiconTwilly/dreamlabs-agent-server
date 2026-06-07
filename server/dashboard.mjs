@@ -18,8 +18,10 @@ import { timingSafeEqual, createHmac, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 // Account-level connectors (BYO OAuth apps). Logic + UI live in their own files
 // so this dashboard stays small and doesn't collide with concurrent design edits.
-import { googleStatus, saveGoogleCreds, buildGoogleAuthUrl, googleHandleCallback, disconnectGoogle, validGoogleToken } from './google.mjs';
-import { connectionsPage, googleConnectionPage, googleCallbackResultPage } from './connections.mjs';
+import { CONNECTORS, byId as connById } from './connectors/registry.mjs';
+import * as engine from './connectors/engine.mjs';
+import { connectionsPage, connectorPage, connectorCallbackResultPage } from './connections.mjs';
+import * as dl from './dl-backend.mjs';
 
 const DATA = process.env.DL_DATA || '/var/dreamlabs';
 const APP = process.env.DL_APP || '/opt/dreamlabs';
@@ -76,33 +78,9 @@ const TEMPLATES = [
 ];
 
 // Connector catalog - tutorials are baked in (the customer wires these on their end).
-const CONNECTORS = [
-  { id: 'gmail', name: 'Google (Gmail / Calendar / Drive)', icon: '📧', steps: [
-    'Connect your Google account once under Connections > Google (you create your own Google app - the dashboard walks you through it).',
-    'Tick this connector on the agents that should use it. Each run the agent receives a short-lived GOOGLE_ACCESS_TOKEN (never your client secret or refresh token).',
-    'The agent calls the Gmail / Calendar / Drive REST API with that token, e.g. curl -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" https://gmail.googleapis.com/gmail/v1/users/me/profile',
-  ]},
-  { id: 'telegram', name: 'Telegram', icon: '✈️', steps: [
-    'Create a bot with @BotFather and copy the bot token.',
-    'Add `TELEGRAM_BOT_TOKEN` to /etc/dreamlabs/secrets.env (never the repo).',
-    'Enable the Telegram MCP server in `mcp.json`; the agent can then send/read messages.',
-  ]},
-  { id: 'slack', name: 'Slack', icon: '💬', steps: [
-    'Create a Slack app, add bot scopes (chat:write, channels:read), install to the workspace.',
-    'Store the bot token in secrets.env as `SLACK_BOT_TOKEN`.',
-    'Enable the Slack MCP server in `mcp.json`.',
-  ]},
-  { id: 'github', name: 'GitHub', icon: '🐙', steps: [
-    'Create a fine-grained PAT scoped to the repos this agent should touch.',
-    'The installer already stored a `GITHUB_TOKEN` to clone your repo; reuse or scope a second one.',
-    'The GitHub MCP server lets the agent open PRs, read issues, and comment.',
-  ]},
-  { id: 'notion', name: 'Notion', icon: '📓', steps: [
-    'Create a Notion internal integration and share the target pages/databases with it.',
-    'Store the secret as `NOTION_TOKEN` in secrets.env.',
-    'Enable the Notion MCP server in `mcp.json`.',
-  ]},
-];
+// Per-routine connector enablement now uses the account-level connector registry
+// (server/connectors/registry.mjs) + engine. Ticking an app on a routine injects
+// its short-lived token/key at run time. Imported above as CONNECTORS + connById.
 
 if (!TOKEN || TOKEN.length < 16) {
   console.error('FATAL: DASH_TOKEN must be set (>=16 chars). Refusing to start without auth.');
@@ -406,7 +384,7 @@ function baseUrl(req) {
   const host = req.headers.host || `${HOST}:${PORT}`;
   return `${proto}://${host}`;
 }
-const googleRedirect = (req) => baseUrl(req) + '/connection/google/callback';
+const connRedirect = (req, id) => baseUrl(req) + '/connection/' + id + '/callback';
 const ui = () => ({ layout, esc });
 
 // ---------- UI (Claude routines design language) ----------
@@ -522,6 +500,15 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 .connchip:hover{background:var(--surface-3)}
 .connchip.on{border-color:var(--accent);background:var(--accent-soft);color:var(--ink)}
 .connchip input{display:none}
+/* connector directory (Claude-connectors look: dark tiles, real brand logos) */
+.conn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.conn-card{display:flex;align-items:center;gap:12px;padding:11px 13px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface-1);transition:all .1s ease;min-width:0}
+.conn-card:hover{background:var(--surface-2);border-color:var(--border-strong)}
+.conn-ic{flex:0 0 auto;width:40px;height:40px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:20px;background:rgba(255,255,255,.05);border:1px solid var(--border)}
+.conn-ic img{width:23px;height:23px;display:block}
+.conn-meta{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
+.conn-name{font-weight:560;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.conn-sub{font-size:11px}
 details.tut{background:var(--surface-1);border:1px solid var(--border);border-radius:var(--r-md);padding:0;margin-bottom:8px;overflow:hidden}
 details.tut>summary{padding:11px 14px;cursor:pointer;font-size:13px;color:var(--muted);list-style:none;display:flex;align-items:center;gap:8px}
 details.tut>summary::-webkit-details-marker{display:none}
@@ -540,6 +527,9 @@ legend{font-size:12px;color:var(--subtle);font-weight:560;padding:0 8px}
 .sectlabel{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--tertiary);font-weight:600;margin:26px 0 10px}
 .log{background:var(--log-bg);border:1px solid var(--border);border-radius:var(--r-md);padding:14px 16px;font-family:var(--mono);font-size:12px;line-height:1.65;color:var(--muted);white-space:pre-wrap;word-break:break-word;max-height:520px;overflow:auto}
 .runrow{display:flex;align-items:center;justify-content:space-between;padding:11px 15px;border-bottom:1px solid var(--border);font-size:12.5px}
+a.runrow{cursor:pointer;color:inherit;transition:background .1s ease}
+a.runrow:hover{background:var(--surface-2)}
+.runrow.sel{box-shadow:inset 2px 0 0 var(--accent);background:var(--surface-2)}
 .runrow:last-child{border-bottom:0}
 .runrow .ts{font-family:var(--mono);color:var(--tertiary);font-size:11px}
 .rc-ok{color:var(--green)} .rc-bad{color:var(--red)}
@@ -645,15 +635,38 @@ function triggerLabel(t) {
   if (t.type === 'webhook') return 'GitHub event';
   return esc(t.type);
 }
+// Parse both the compact run stamp (YYYYMMDDTHHMMSSZ - no dashes/colons) AND plain
+// ISO. The compact form is NOT parseable by new Date() until we re-insert the
+// separators, which is why run times used to render as raw stamps.
+function parseStamp(iso) {
+  if (!iso) return null;
+  let s = String(iso);
+  const m = s.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/);
+  if (m) s = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
 function relTime(iso) {
   if (!iso) return 'never';
-  const norm = iso.replace(/(\d{8})T(\d{2})(\d{2})(\d{2})Z/, '$1T$2:$3:$4Z');
-  const d = (Date.now() - new Date(norm).getTime()) / 1000;
-  if (isNaN(d)) return esc(iso);
+  const dt = parseStamp(iso);
+  if (!dt) return esc(iso);
+  const d = (Date.now() - dt.getTime()) / 1000;
   if (d < 60) return 'just now';
   if (d < 3600) return Math.floor(d / 60) + 'm ago';
   if (d < 86400) return Math.floor(d / 3600) + 'h ago';
   return Math.floor(d / 86400) + 'd ago';
+}
+// Schedules fire in the SERVER's timezone (cron has no CRON_TZ), and the calendar
+// renders in it too, so the whole UI is coherent - we just have to SHOW which zone
+// it is (on a cloud VPS it is often UTC; on a Mac it is your Mac's zone).
+const SERVER_TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'server local'; } catch { return 'server local'; } })();
+const serverNow = () => { try { return new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+// Render a stored UTC run stamp (YYYYMMDDTHHMMSSZ or ISO) in the server timezone,
+// so run history reads in the same zone schedules fire in.
+function fmtLocal(iso) {
+  const d = parseStamp(iso);
+  if (!d) return esc(iso);
+  try { return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return esc(iso); }
 }
 
 // ---- minimal cron evaluation for the Calendar tab (standard 5-field crons) ----
@@ -728,7 +741,7 @@ function calendarBody(mo = 0) {
   return `<div class="cal-head"><div class="cal-month">${esc(monthName)}</div>
       <div class="row-actions"><a class="btn ghost sm" href="/?view=calendar&mo=${mo - 1}">‹</a><a class="btn ghost sm" href="/?view=calendar">Today</a><a class="btn ghost sm" href="/?view=calendar&mo=${mo + 1}">›</a></div></div>
     <div class="cal"><div class="cal-wd">${wd}</div><div class="cal-grid">${grid}</div></div>
-    <p class="hint" style="margin-top:10px">High-frequency routines collapse to <b>x N</b> per day. Each chip links to its routine.</p>`;
+    <p class="hint" style="margin-top:10px">High-frequency routines collapse to <b>x N</b> per day. Each chip links to its routine. Times are in the <b>server timezone: ${esc(SERVER_TZ)}</b>.</p>`;
 }
 
 // Daily Briefing card (written by briefing.mjs; delivered via the Dream Labs relay).
@@ -769,11 +782,13 @@ function pageList(view, mo) {
   const chips = ['Summarize my open PRs every weekday morning', 'Triage new issues and flag duplicates each morning', 'Draft release notes whenever a PR merges']
     .map(c => `<a class="chip" href="/new?prefill=${encodeURIComponent(c)}">${esc(c)}</a>`).join('');
 
+  const dlPanel = isCal ? '' : dl.dlOnboardingPanel({ esc, connById, allConnectors: CONNECTORS, isConnected: (id) => { const m = connById(id); return !!(m && engine.status(m).connected); } });
   const body = `
   <div class="flex-between">
     <div><h2 class="title">Routines</h2><p class="lede">Templated agents that run on a schedule, by API, or on a GitHub event - on your box, your keys, any model.</p></div>
     <a class="btn" href="/new">+ New routine</a>
   </div>
+  ${dlPanel}
   <form method="get" action="/new"><input class="promptbox" name="prefill" placeholder="What do you want automated?" autocomplete="off"></form>
   <div class="chips">${chips}</div>
   <div class="tabbar"><div class="tabs">
@@ -785,15 +800,17 @@ function pageList(view, mo) {
 }
 
 function connectorsTab(enabled) {
-  const chips = CONNECTORS.map(c =>
-    `<label class="connchip ${enabled.includes(c.id) ? 'on' : ''}"><input type="checkbox" name="connectors" value="${c.id}" ${enabled.includes(c.id) ? 'checked' : ''} onchange="this.closest('.connchip').classList.toggle('on',this.checked)">${c.icon} ${esc(c.name)}</label>`
+  enabled = enabled || [];
+  const connected = CONNECTORS.filter(m => m.auth !== 'none' && engine.status(m).connected);
+  // keep any already-enabled ids even if not currently connected, so they aren't dropped on save
+  const extra = enabled.filter(id => !connected.some(m => m.id === id)).map(connById).filter(Boolean);
+  const list = [...connected, ...extra];
+  const chips = list.map(m =>
+    `<label class="connchip ${enabled.includes(m.id) ? 'on' : ''}"><input type="checkbox" name="connectors" value="${esc(m.id)}" ${enabled.includes(m.id) ? 'checked' : ''} onchange="this.closest('.connchip').classList.toggle('on',this.checked)">${esc(m.icon)} ${esc(m.name)}</label>`
   ).join('');
-  const tuts = CONNECTORS.map(c =>
-    `<details class="tut"><summary>${c.icon} How to connect ${esc(c.name)}</summary><ol>${c.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol></details>`
-  ).join('');
-  return `<div class="conn-chips">${chips}</div>
-    <div class="warn">⚠️ <div>Connected tools can be used by the agent during runs - including writes - without asking. Only enable what this routine needs. Setup happens on your box; the step-by-step is below.</div></div>
-    <div style="margin-top:14px"><div class="hint" style="margin-bottom:8px">Setup guides (baked in)</div>${tuts}</div>`;
+  return `${chips ? `<div class="conn-chips">${chips}</div>` : '<p class="hint">No apps connected yet.</p>'}
+    <div class="warn">⚠️ <div>A ticked app is handed to the agent during runs - including writes - without asking. Only enable what this routine needs.</div></div>
+    <p class="hint" style="margin-top:10px"><a href="/connections">Connect more apps</a> in the directory - each gets a short-lived token at run time, only when ticked here.</p>`;
 }
 
 function formPage(r, prefill) {
@@ -855,7 +872,7 @@ function formPage(r, prefill) {
       </div>
       <div class="trig-config" id="tc-schedule" style="display:none">
         <label class="field" style="margin-top:12px"><span class="lab">Cron expression</span>
-          <span class="hint">Any interval - sub-hourly is the whole point of self-hosting. <code>*/15 * * * *</code> = every 15 min.</span>
+          <span class="hint">Any interval - sub-hourly is the whole point of self-hosting. <code>*/15 * * * *</code> = every 15 min. Runs in the <b>server timezone: ${esc(SERVER_TZ)}</b> (server clock now ${esc(serverNow())}). On a cloud VPS this is often UTC - set the box timezone if you want local times.</span>
           <input name="cron" value="${esc(t.cron || '0 9 * * *')}" placeholder="0 9 * * *"></label>
       </div>
       <div class="trig-config" id="tc-api" style="display:none"><p class="contract-note" style="margin-top:12px">Trigger with <code>POST ${esc(PUBLIC_URL || '<dashboard-url>')}/api/trigger/&lt;id&gt;</code> and header <code>Authorization: Bearer &lt;token&gt;</code> (your access key).</p></div>
@@ -923,28 +940,32 @@ function formPage(r, prefill) {
   return layout(isEdit ? 'Edit routine' : 'New routine', body, isEdit ? 'Edit routine' : 'New routine');
 }
 
-function detailPage(r) {
+function detailPage(r, wantLog) {
   const runs = readRuns(r.id, 25);
   const logs = listLogs(r.id);
+  // Which run's output to show: the requested one (if it exists) else the latest.
+  const selLog = (wantLog && /^[0-9TZ]+\.log$/.test(wantLog) && logs.includes(wantLog)) ? wantLog : logs[0];
   const lr = lastRun(r.id);
   const statusPill = r.paused
     ? `<span class="pill paused"><span class="dotmark"></span>paused</span>`
     : `<span class="pill live"><span class="dotmark"></span>active</span>`;
   const c = r.contract || {};
   const runRows = runs.filter(x => ['run', 'autopause', 'skip'].includes(x.event)).map(x => {
-    if (x.event === 'autopause') return `<div class="runrow"><span class="rc-bad">⏸ auto-paused after ${esc(x.afterFailures)} failures</span><span class="ts">${esc(x.ts)}</span></div>`;
-    if (x.event === 'skip') return `<div class="runrow"><span class="tert">skipped (${esc(x.reason)})</span><span class="ts">${esc(x.ts)}</span></div>`;
+    if (x.event === 'autopause') return `<div class="runrow"><span class="rc-bad">⏸ auto-paused after ${esc(x.afterFailures)} failures</span><span class="ts" title="${esc(x.ts)} UTC">${fmtLocal(x.ts)}</span></div>`;
+    if (x.event === 'skip') return `<div class="runrow"><span class="tert">skipped (${esc(x.reason)})</span><span class="ts" title="${esc(x.ts)} UTC">${fmtLocal(x.ts)}</span></div>`;
     const ok = x.rc === 0;
-    return `<div class="runrow"><span>${ok ? '<span class="rc-ok">✓ success</span>' : '<span class="rc-bad">✗ failed (rc ' + esc(x.rc) + ')</span>'} <span class="tert">· ${esc(x.trigger)} · ${esc(x.durationSec)}s</span></span><span class="ts">${esc(x.ts)}</span></div>`;
+    const logf = x.ts + '.log';
+    const sel = logf === selLog ? ' sel' : '';
+    return `<a class="runrow${sel}" href="/routine/${esc(r.id)}?log=${esc(logf)}#log"><span>${ok ? '<span class="rc-ok">✓ success</span>' : '<span class="rc-bad">✗ failed (rc ' + esc(x.rc) + ')</span>'} <span class="tert">· ${esc(x.trigger)} · ${esc(x.durationSec)}s · view output ›</span></span><span class="ts" title="${esc(x.ts)} UTC">${fmtLocal(x.ts)}</span></a>`;
   }).join('');
-  const latestLog = logs[0] ? readLog(r.id, logs[0]) : null;
-  const conns = (r.connectors || []).map(id => { const c = CONNECTORS.find(x => x.id === id); return c ? c.icon + ' ' + c.name : id; }).join(' · ') || 'none';
+  const shownLog = selLog ? readLog(r.id, selLog) : null;
+  const conns = (r.connectors || []).map(id => { const c = connById(id); return c ? c.icon + ' ' + c.name : id; }).join(' · ') || 'none';
 
   const body = `
   <a class="back" href="/">← All routines</a>
   <div class="flex-between">
     <div><h2 class="title">${esc(r.name)} ${statusPill}</h2>
-      <div class="r-meta" style="font-size:12.5px;margin-top:7px"><span>${triggerLabel(r.trigger)}</span><span>·</span><span>${esc(PROVIDER_LABEL[r.provider] || r.provider)}${r.model ? ' (' + esc(r.model) + ')' : ''}</span><span>·</span><span>last run ${relTime(lr?.ts)}</span></div>
+      <div class="r-meta" style="font-size:12.5px;margin-top:7px"><span>${triggerLabel(r.trigger)}</span><span>·</span><span>${esc(PROVIDER_LABEL[r.provider] || r.provider)}${r.model ? ' (' + esc(r.model) + ')' : ''}</span><span>·</span><span>last run ${lr ? (lr.rc === 0 ? '<span class="rc-ok">✓ success</span>' : '<span class="rc-bad">✗ failed (rc ' + esc(lr.rc) + ')</span>') + ' ' + relTime(lr.ts) : 'never run'}</span></div>
     </div>
     <div class="row-actions">
       <form method="post" action="/routine/${esc(r.id)}/run" onsubmit="this.querySelector('button').textContent='Running…'"><button class="btn">Run now</button></form>
@@ -969,10 +990,10 @@ function detailPage(r) {
   <div class="sectlabel">Instructions</div>
   <div class="card"><div class="log" style="background:var(--surface-1);color:var(--muted);max-height:240px">${esc(r.instructions || '(none)')}</div></div>
 
-  <div class="sectlabel">Recent runs</div>
+  <div class="sectlabel">Recent runs <span class="tert" style="text-transform:none;letter-spacing:0;font-weight:400">· click a run to see what it did</span></div>
   <div class="card">${runRows || '<div class="empty"><div>No runs yet.</div></div>'}</div>
 
-  ${latestLog ? `<div class="sectlabel">Latest log <span class="tert" style="text-transform:none;letter-spacing:0">· ${esc(logs[0])}</span></div><div class="log">${esc(latestLog)}</div>` : ''}`;
+  ${shownLog ? `<div class="sectlabel" id="log">${selLog === logs[0] ? 'Latest run output' : 'Run output'} <span class="tert" style="text-transform:none;letter-spacing:0">· ${esc(selLog)}${selLog !== logs[0] ? ` · <a href="/routine/${esc(r.id)}#log">back to latest</a>` : ''}</span></div><div class="log">${esc(shownLog)}</div>` : ''}`;
   return layout(r.name, body, esc(r.name));
 }
 
@@ -1193,11 +1214,9 @@ async function accessPage() {
   <p class="hint" style="margin-top:10px"><a href="/providers">Connect more providers or swap the default</a> - all by click, no terminal. Your first provider was set up during install.</p>
 
   <div class="sectlabel">Connected apps</div>
-  <div class="card"><div class="cred"><span>📧 Google <span class="tert">· Gmail, Calendar, Drive</span></span>
-    ${(() => { const gx = googleStatus(); return gx.connected
-      ? `<span class="row-actions"><span class="pill live"><span class="dotmark"></span>connected${gx.email ? ' · ' + esc(gx.email) : ''}</span> <a class="btn ghost sm" href="/connection/google">Manage</a></span>`
-      : '<a class="btn sm" href="/connections">Connect</a>'; })()}</div></div>
-  <p class="hint" style="margin-top:10px"><a href="/connections">Connect Gmail, Calendar and Drive</a> with your own Google account - agents get a short-lived token only when a routine needs it.</p>
+  <div class="card"><div class="cred"><span>${(() => { const n = CONNECTORS.filter(m => m.auth !== 'none' && engine.status(m).connected).length; return n ? '<b>' + n + '</b> app' + (n > 1 ? 's' : '') + ' connected' : 'No apps connected yet'; })()} <span class="tert">· Gmail, Slack, Stripe, HubSpot, Notion and 70+ more</span></span>
+    <a class="btn sm" href="/connections">Open directory</a></div></div>
+  <p class="hint" style="margin-top:10px"><a href="/connections">Browse the connector directory</a> - connect with your own account; agents get a short-lived token only when a routine ticks the app.</p>
 
   <div class="sectlabel">Source control</div>
   <div class="card">${ghRow}</div>
@@ -1220,7 +1239,7 @@ function buildRoutineFromForm(f, existing) {
   if (triggerType === 'schedule') trigger.cron = (f.cron || '').trim().slice(0, 80);
   const num = (v, d, lo, hi) => { const n = parseInt(v, 10); return isNaN(n) ? d : Math.min(hi, Math.max(lo, n)); };
   let connectors = f.connectors ? (Array.isArray(f.connectors) ? f.connectors : [f.connectors]) : [];
-  connectors = connectors.filter(c => CONNECTORS.some(x => x.id === c));
+  connectors = connectors.filter(c => !!connById(c));
   return {
     id: existing?.id || slugify(name),
     name: name || 'Untitled routine',
@@ -1298,9 +1317,11 @@ const server = http.createServer(async (req, res) => {
   // is SameSite=Strict, so it is withheld on the cross-site redirect back from
   // Google. Instead this is authenticated by the one-time `state` we issued and
   // stored when the (authed) user clicked Connect - standard OAuth CSRF binding.
-  if (path === '/connection/google/callback' && method === 'GET') {
-    const result = await googleHandleCallback(url.searchParams);
-    return send(res, result.ok ? 200 : 400, googleCallbackResultPage(ui(), result));
+  if (path.startsWith('/connection/') && path.endsWith('/callback') && method === 'GET') {
+    const cid = path.slice('/connection/'.length, -'/callback'.length);
+    const m = connById(cid);
+    if (m && m.auth === 'oauth') { const result = await engine.handleCallback(m, url.searchParams); return send(res, result.ok ? 200 : 400, connectorCallbackResultPage(ui(), m, result)); }
+    return send(res, 404, layout('Not found', '<div class="empty">Unknown connector</div>'));
   }
 
   // Everything below requires auth.
@@ -1314,21 +1335,21 @@ const server = http.createServer(async (req, res) => {
     if (path === '/new') return send(res, 200, formPage(null, url.searchParams.get('prefill') || ''));
     if (path === '/access') return send(res, 200, await accessPage());
     if (path === '/connections') return send(res, 200, connectionsPage(ui()));
-    if (path === '/connection/google') return send(res, 200, googleConnectionPage(ui(), { redirect: googleRedirect(req) }));
-    if (path === '/connection/google/connect') {
-      const u = buildGoogleAuthUrl(googleRedirect(req));
-      return u ? redirect(res, u) : send(res, 200, googleConnectionPage(ui(), { redirect: googleRedirect(req), error: 'Save your Client ID and secret first.' }));
-    }
-    if (path === '/connection/google/test') {
-      const tok = await validGoogleToken();
-      let tested = 'Could not mint a token. Try reconnecting Google.';
-      if (tok) {
-        try {
-          const r = await fetch('https://openidconnect.googleapis.com/v1/userinfo', { headers: { authorization: 'Bearer ' + tok }, signal: AbortSignal.timeout(8000) });
-          tested = r.ok ? ('Token works - Google replied for ' + ((await r.json()).email || 'your account') + '.') : ('Google returned HTTP ' + r.status + '.');
-        } catch { tested = 'Could not reach Google from this box.'; }
+    if (path.startsWith('/connection/')) {
+      const [cid, action] = path.slice('/connection/'.length).split('/');
+      const m = connById(cid);
+      if (!m) return send(res, 404, layout('Not found', '<div class="empty">Unknown connector</div>'));
+      if (!action) return send(res, 200, connectorPage(ui(), m, { redirect: connRedirect(req, cid) }));
+      if (action === 'connect') {
+        if (m.auth !== 'oauth') return redirect(res, '/connection/' + cid);
+        const u = engine.buildAuthUrl(m, connRedirect(req, cid));
+        return u ? redirect(res, u) : send(res, 200, connectorPage(ui(), m, { redirect: connRedirect(req, cid), error: 'Save your Client ID and secret first.' }));
       }
-      return send(res, 200, googleConnectionPage(ui(), { redirect: googleRedirect(req), tested }));
+      if (action === 'test') {
+        const tok = await engine.validToken(m);
+        return send(res, 200, connectorPage(ui(), m, { redirect: connRedirect(req, cid), tested: tok ? 'Token works - a fresh access token was minted.' : 'Could not mint a token. Reconnect.' }));
+      }
+      return send(res, 404, layout('Not found', '<div class="empty">Unknown action</div>'));
     }
     if (path === '/providers') return send(res, 200, providersPage());
     if (path.startsWith('/provider/')) {
@@ -1349,7 +1370,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (path.startsWith('/routine/')) {
       const r = getRoutine(path.slice('/routine/'.length));
-      return r ? send(res, 200, detailPage(r)) : send(res, 404, layout('Not found', '<div class="empty">Routine not found</div>'));
+      return r ? send(res, 200, detailPage(r, url.searchParams.get('log'))) : send(res, 404, layout('Not found', '<div class="empty">Routine not found</div>'));
     }
   }
 
@@ -1360,6 +1381,25 @@ const server = http.createServer(async (req, res) => {
     if (path === '/update') {
       requestUpdate();
       return redirect(res, '/access');
+    }
+    // Dream Labs personalization bridge (consumer side). Logic lives in dl-backend.mjs.
+    if (path === '/dl/connect') {
+      const r = await dl.dlConnect(f.email || '');
+      if (!r.ok) return send(res, 200, layout('Dream Labs', '<div class="empty"><div class="big">Could not connect</div><div>' + esc(r.error || 'Unknown error') + '</div><div style="margin-top:16px"><a class="btn" href="/">Back to routines</a></div></div>'));
+      return redirect(res, '/');
+    }
+    if (path === '/dl/sync') { await dl.dlSync(); return redirect(res, '/'); }
+    if (path === '/dl/disconnect') { dl.dlClear(); return redirect(res, '/'); }
+    if (path.startsWith('/dl/install/')) {
+      const agentId = slugify(path.slice('/dl/install/'.length));
+      const def = await dl.dlFetchAgent(agentId);
+      if (!def) return send(res, 200, layout('Dream Labs', '<div class="empty"><div class="big">Could not install</div><div>Could not fetch that agent from Dream Labs. Try Sync, or check your connection.</div><div style="margin-top:16px"><a class="btn" href="/">Back to routines</a></div></div>'));
+      const routine = dl.dlBuildRoutine(def, { connById, slugify, PROVIDERS, nowISO, allConnectors: CONNECTORS });
+      const data = readRoutines();
+      let id = routine.id, n = 2; while (data.routines.some(r => r.id === id)) { id = routine.id + '-' + n; n++; }
+      routine.id = id;
+      data.routines.push(routine); writeRoutines(data);
+      return redirect(res, '/routine/' + id);
     }
     // Provider connect (OAuth spawn / key paste / default / disconnect) - all click.
     if (path.startsWith('/provider/')) {
@@ -1413,15 +1453,21 @@ const server = http.createServer(async (req, res) => {
       clearGithubDevice();
       return redirect(res, '/github');
     }
-    // Google connector: save the customer's own OAuth app creds (+ scopes + redirect), or disconnect.
-    if (path === '/connection/google/creds') {
-      const scopeKeys = f.scopeKeys ? (Array.isArray(f.scopeKeys) ? f.scopeKeys : [f.scopeKeys]) : [];
-      saveGoogleCreds({ clientId: f.clientId, clientSecret: f.clientSecret, scopeKeys, redirectUri: (f.redirectUri || '').trim() || googleRedirect(req) });
-      return redirect(res, '/connection/google');
-    }
-    if (path === '/connection/google/disconnect') {
-      await disconnectGoogle();
-      return redirect(res, '/connection/google');
+    // Connector creds (oauth: client id/secret + scopes; apikey: the fields) or disconnect - generic.
+    if (path.startsWith('/connection/')) {
+      const [cid, action] = path.slice('/connection/'.length).split('/');
+      const m = connById(cid);
+      if (m && action === 'creds') {
+        if (m.auth === 'oauth') {
+          const scopeKeys = f.scopeKeys ? (Array.isArray(f.scopeKeys) ? f.scopeKeys : [f.scopeKeys]) : [];
+          engine.saveCreds(m, { clientId: f.clientId, clientSecret: f.clientSecret, scopeKeys, redirectUri: (f.redirectUri || '').trim() || connRedirect(req, cid) });
+        } else if (m.auth === 'apikey') {
+          const input = {}; for (const fl of (m.fields || [])) input[fl.name] = f[fl.name];
+          engine.saveCreds(m, input);
+        }
+        return redirect(res, '/connection/' + cid);
+      }
+      if (m && action === 'disconnect') { await engine.disconnect(m); return redirect(res, '/connection/' + cid); }
     }
     if (path === '/routine') {
       const data = readRoutines();

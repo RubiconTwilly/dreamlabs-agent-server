@@ -82,10 +82,10 @@ case "$PROV" in
     ;;
 esac
 
-# Connector tokens (only present when the routine ticked that connector). These
-# are SHORT-LIVED access tokens minted by the runner - never a refresh token or
-# client secret, which stay in the dashboard's 600 connector file out of reach.
-add GOOGLE_ACCESS_TOKEN "${GOOGLE_ACCESS_TOKEN:-}"
+# Connector env vars: the runner injected a short-lived token/key per ticked app
+# and listed their names in DL_CONNECTOR_VARS. Forward ONLY those (by name, via
+# indirect expansion) into the allowlist - never the server's other secrets.
+for v in ${DL_CONNECTOR_VARS:-}; do add "$v" "${!v:-}"; done
 
 cd "$WS"
 # env -i: hard reset of the environment, then apply ONLY the allowlist, so the

@@ -14,8 +14,10 @@ cp "$HERE"/install.sh "$HERE"/install-macos.sh "$HERE"/VERSION "$STAGE/"
 cp "$HERE"/wizard/index.html "$STAGE/index.html"
 cp "$HERE"/wizard/icon.png "$HERE"/wizard/favicon.ico "$HERE"/wizard/favicon-32.png "$HERE"/wizard/apple-touch-icon.png "$STAGE/"
 cp "$HERE"/server/run-agent.sh "$HERE"/server/agent-jail.sh "$HERE"/server/api-call.mjs \
-   "$HERE"/server/dashboard.mjs "$HERE"/server/google.mjs "$HERE"/server/connections.mjs \
+   "$HERE"/server/dashboard.mjs "$HERE"/server/connections.mjs "$HERE"/server/dl-backend.mjs \
    "$HERE"/server/briefing.mjs "$HERE"/server/update-self.sh "$STAGE/server/"
+mkdir -p "$STAGE/server/connectors"
+cp "$HERE"/server/connectors/engine.mjs "$HERE"/server/connectors/registry.mjs "$HERE"/server/connectors/registry-generated.mjs "$STAGE/server/connectors/"
 cp "$HERE"/workspace-seed/SOUL.md "$HERE"/workspace-seed/mcp.json "$STAGE/workspace-seed/"
 tar czf "$STAGE.tgz" -C "$STAGE" .
 

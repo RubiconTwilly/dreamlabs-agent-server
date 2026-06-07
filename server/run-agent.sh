@@ -68,9 +68,17 @@ release() { rmdir "$LOCKDIR/$1.lock.d" 2>/dev/null || true; }
 jfield() { jq -r --arg id "$ID" ".routines[] | select(.id==\$id) | $1" "$ROUTINES" 2>/dev/null; }
 append_row() { acquire runs || true; printf '%s\n' "$1" >> "$RUNS"; release runs; }
 alert() {
+  local msg="$1"
+  # Primary: the Dream Labs relay, so members get alerts on the DL Telegram with no
+  # bot of their own - same relay URL + key as the daily briefing, tagged type:alert.
+  if [ -n "${DL_BRIEFING_URL:-}" ]; then
+    DL_RELAY_URL="$DL_BRIEFING_URL" DL_RELAY_KEY="${DL_BRIEFING_KEY:-}" DL_RELAY_BOX="${DL_BOX_ID:-}" DL_RELAY_MSG="$msg" \
+      node -e 'fetch(process.env.DL_RELAY_URL,{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+(process.env.DL_RELAY_KEY||"")},body:JSON.stringify({type:"alert",boxId:process.env.DL_RELAY_BOX||"",text:process.env.DL_RELAY_MSG||""}),signal:AbortSignal.timeout(10000)}).then(()=>process.exit(0)).catch(()=>process.exit(0))' >/dev/null 2>&1 || true
+  fi
+  # Fallback: the self-hoster's own Telegram bot.
   [ -n "${ALERT_TG_TOKEN:-}" ] && [ -n "${ALERT_TG_CHAT:-}" ] || return 0
   curl -fsS -m 10 "https://api.telegram.org/bot${ALERT_TG_TOKEN}/sendMessage" \
-    -d chat_id="${ALERT_TG_CHAT}" --data-urlencode text="$1" >/dev/null 2>&1 || true
+    -d chat_id="${ALERT_TG_CHAT}" --data-urlencode text="$msg" >/dev/null 2>&1 || true
 }
 set_paused() {
   acquire routines || true
@@ -192,23 +200,22 @@ chmod 640 "$INSTRFILE" 2>/dev/null || true
 chgrp dlws "$INSTRFILE" 2>/dev/null || true
 
 # ---------- connector tokens ----------
-# Mint a SHORT-LIVED Google access token only if this routine ticked the Google
-# connector. The refresh token + client secret stay in the dashboard's 600
-# connector file and are never handed to the jailed agent - only this token is.
-CONNECTORS_CSV="$(jfield '(.connectors // []) | join(",")')"
-GOOGLE_ACCESS_TOKEN=""
-case ",$CONNECTORS_CSV," in
-  *,gmail,*|*,google,*)
-    if [ -f "$DL_DATA/connectors/google.json" ]; then
-      GOOGLE_ACCESS_TOKEN="$(node "$DL_APP/bin/google.mjs" token 2>>"$LOG" || true)"
-      if [ -n "$GOOGLE_ACCESS_TOKEN" ]; then echo "--- google connector: access token minted ---" >> "$LOG"
-      else echo "--- google connector ticked but no valid token (reconnect Google in the dashboard) ---" >> "$LOG"; fi
-    else
-      echo "--- google connector ticked but Google is not connected yet ---" >> "$LOG"
-    fi
-    ;;
-esac
-export GOOGLE_ACCESS_TOKEN
+# For each app this routine ticked, ask the connector engine for the env vars to
+# inject (a SHORT-LIVED OAuth access token, or the stored API key). Only the named
+# vars are forwarded into the jail (see agent-jail.sh); the refresh token + client
+# secret + raw keys stay in the dashboard's 600 connector files, out of reach.
+CONNECTORS_LIST="$(jfield '(.connectors // []) | join(" ")')"
+DL_CONNECTOR_VARS=""
+for cid in $CONNECTORS_LIST; do
+  [[ "$cid" =~ ^[a-z0-9][a-z0-9-]{0,39}$ ]] || continue
+  cenv="$(node "$DL_APP/bin/connectors/engine.mjs" env "$cid" 2>>"$LOG" || true)"
+  if [ -z "$cenv" ]; then echo "--- connector $cid: not connected / no token ---" >> "$LOG"; continue; fi
+  eval "$cenv"   # `export NAME='shell-escaped-value'` lines from the engine
+  cnames="$(printf '%s\n' "$cenv" | sed -n 's/^export \([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p')"
+  DL_CONNECTOR_VARS="$DL_CONNECTOR_VARS $cnames"
+  echo "--- connector $cid: injected $cnames ---" >> "$LOG"
+done
+export DL_CONNECTOR_VARS
 
 START_S=$SECONDS
 set +e
