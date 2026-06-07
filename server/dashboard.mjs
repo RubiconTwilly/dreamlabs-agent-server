@@ -32,8 +32,10 @@ const VERSION_FILE = join(APP, 'VERSION');
 const UPDATE_FLAG = join(DATA, '.update-requested');   // dashboard writes; root systemd path applies
 const UPDATE_STATUS = join(DATA, 'update-status.json'); // root updater writes; dashboard reads
 const UPDATE_URL = process.env.DL_UPDATE_URL || 'https://get.joindreamlabs.com';
-const GITHUB_TOKEN_FILE = join(DATA, 'github.token'); // 600, dreamlabs-owned. Read by dashboard (repo list) + runner (clone).
+const GITHUB_TOKEN_FILE = join(DATA, 'github.token'); // 600, dreamlabs-owned. Read by dashboard (repo list) + runner (clone+push).
 const GITHUB_JSON = join(DATA, 'github.json');        // {connected, login} - no token
+const GITHUB_CLIENT_ID = process.env.DL_GITHUB_CLIENT_ID || ''; // Dream Labs OAuth App id (public) -> enables one-click device-flow connect
+const GITHUB_DEVICE = join(DATA, 'github-device.json'); // transient device-flow state
 const VERSION = (() => { try { return readFileSync(VERSION_FILE, 'utf8').trim(); } catch { return 'dev'; } })();
 const RUNNER = join(APP, 'bin', 'run-agent.sh');
 const CRON_TAG = 'dreamlabs-agent-server';
@@ -183,6 +185,47 @@ function startProviderConnect(prov) {
 
 function githubStatus() { return readJSON(GITHUB_JSON, { connected: false }); }
 function readGithubToken() { try { return readFileSync(GITHUB_TOKEN_FILE, 'utf8').trim(); } catch { return ''; } }
+function githubDevice() { return readJSON(GITHUB_DEVICE, null); }
+function clearGithubDevice() { try { if (existsSync(GITHUB_DEVICE)) writeFileSync(GITHUB_DEVICE, ''); } catch {} }
+function saveGithubToken(token, login, via) {
+  writeFileSync(GITHUB_TOKEN_FILE, token, { mode: 0o600 });
+  writeFileSync(GITHUB_JSON, JSON.stringify({ connected: true, login: login || '', connectedAt: nowISO(), via }, null, 2));
+}
+// One-click connect: GitHub OAuth device flow (repo scope = read+write). No secret on the box.
+async function ghDeviceStart() {
+  if (!GITHUB_CLIENT_ID) return null;
+  try {
+    const r = await fetch('https://github.com/login/device/code', {
+      method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' },
+      body: JSON.stringify({ client_id: GITHUB_CLIENT_ID, scope: 'repo' }), signal: AbortSignal.timeout(8000),
+    });
+    const d = await r.json();
+    if (!d.device_code) return null;
+    writeFileSync(GITHUB_DEVICE, JSON.stringify({ ...d, startedAt: Date.now() }));
+    return d;
+  } catch { return null; }
+}
+async function ghDevicePoll() {
+  const dev = githubDevice(); if (!dev || !dev.device_code) return { idle: true };
+  if (Date.now() - (dev.startedAt || 0) > (dev.expires_in || 900) * 1000) { clearGithubDevice(); return { error: 'expired' }; }
+  try {
+    const r = await fetch('https://github.com/login/oauth/access_token', {
+      method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' },
+      body: JSON.stringify({ client_id: GITHUB_CLIENT_ID, device_code: dev.device_code, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const d = await r.json();
+    if (d.access_token) {
+      let login = '';
+      try { const u = await fetch('https://api.github.com/user', { headers: { authorization: 'Bearer ' + d.access_token, 'user-agent': 'dreamlabs-agent-server', accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(8000) }); if (u.ok) login = (await u.json()).login; } catch {}
+      saveGithubToken(d.access_token, login, 'oauth');
+      clearGithubDevice();
+      return { connected: true };
+    }
+    if (d.error === 'authorization_pending' || d.error === 'slow_down') return { pending: true };
+    clearGithubDevice(); return { error: d.error || 'failed' };
+  } catch { return { pending: true }; }
+}
 // Call the GitHub API with the stored token. Returns parsed JSON, {error} on HTTP error, or null if not connected.
 async function gh(path) {
   const t = readGithubToken();
@@ -861,39 +904,77 @@ function detailPage(r) {
   return layout(r.name, body, esc(r.name));
 }
 
-// Connect GitHub: paste a fine-grained PAT. Powers the repo picker + private clones.
+// Connect GitHub: one-click OAuth device flow (read+write). Token paste is a fallback.
 function githubPage(opts) {
   const gs = githubStatus();
   const err = opts && opts.error;
-  const newTokenUrl = 'https://github.com/settings/personal-access-tokens/new';
-  const connected = gs.connected
-    ? `<div class="card" style="padding:16px 18px"><div class="cred" style="border:0;padding:0">
-         <span>Connected as <b>@${esc(gs.login)}</b></span>
-         <form method="post" action="/github/disconnect"><button class="btn ghost sm">Disconnect</button></form></div></div>`
-    : '';
-  const form = `
-    <div class="card" style="padding:18px">
-      <form class="stack" method="post" action="/github/connect" style="margin-top:0;gap:14px">
-        <label class="field"><span class="lab">Fine-grained access token</span>
-          <span class="hint">Create one at <a href="${newTokenUrl}" target="_blank">github.com/settings/personal-access-tokens</a>. Repository access: the repos your agents will use. Permissions: <b>Contents: Read</b> (and <b>Read-only</b> Metadata, added automatically). Add <b>Webhooks: Read &amp; write</b> only if you want GitHub-event triggers.</span>
-          <input name="token" type="password" placeholder="github_pat_..." autocomplete="off" required></label>
-        ${err ? `<div class="warn">⚠️ <div>${esc(err)}</div></div>` : ''}
-        <div class="row-actions"><button class="btn" type="submit">Connect GitHub</button></div>
-      </form>
+  const dev = githubDevice();
+  const devActive = dev && dev.user_code && (Date.now() - (dev.startedAt || 0) < (dev.expires_in || 900) * 1000);
+  const classicTokenUrl = 'https://github.com/settings/tokens/new?scopes=repo&description=Dream+Labs+Agent+Server';
+
+  if (gs.connected) {
+    const body = `<a class="back" href="/access">< Access &amp; keys</a>
+      <h2 class="title">GitHub</h2>
+      <p class="lede">Connected. Agents can read and write the repos you pick.</p>
+      <div class="card" style="padding:16px 18px"><div class="cred" style="border:0;padding:0">
+        <span>Connected as <b>@${esc(gs.login)}</b>${gs.via === 'oauth' ? ' <span class="pill live"><span class="dotmark"></span>one-click</span>' : ''}</span>
+        <form method="post" action="/github/disconnect"><button class="btn ghost sm">Disconnect</button></form></div></div>`;
+    return layout('GitHub', body, 'GitHub');
+  }
+
+  // Primary: one-click device flow (if the OAuth App is configured for this box)
+  let primary;
+  if (GITHUB_CLIENT_ID && devActive) {
+    primary = `<div class="card" style="padding:22px;text-align:center">
+      <div class="r-name" style="margin-bottom:6px">Approve in your browser - almost done</div>
+      <p class="hint" style="margin:0 auto 14px;text-align:center">Go to <a href="${esc(dev.verification_uri)}" target="_blank"><b>${esc(dev.verification_uri)}</b></a> and enter this code:</p>
+      <div class="cmd" style="text-align:center;font-size:28px;letter-spacing:8px;font-weight:700;padding:16px">${esc(dev.user_code)}</div>
+      <p class="hint" style="margin-top:14px;text-align:center">This page connects itself the moment you approve. Grants read + write to the repos you choose.</p>
+      <div style="margin-top:12px"><a class="btn" href="${esc(dev.verification_uri)}" target="_blank">Open GitHub</a></div>
     </div>`;
-  const tut = `
-    <div class="sectlabel">How it works</div>
+  } else if (GITHUB_CLIENT_ID) {
+    primary = `<div class="card" style="padding:26px;text-align:center">
+      <p class="sub" style="margin:0 auto 18px;max-width:380px">One click. You approve once on GitHub, the box handles the rest. Grants read + write to the repos you pick.</p>
+      <form method="post" action="/github/oauth-start"><button class="btn" style="height:50px;padding:0 30px;font-size:15px">Connect GitHub</button></form>
+      ${err ? `<div class="warn" style="margin-top:14px">${esc(err)}</div>` : ''}
+    </div>`;
+  } else {
+    primary = `<div class="card" style="padding:20px">
+      <p class="sub" style="margin:0 0 4px">Paste a token to connect (one pre-filled link, read + write):</p>
+      <p class="hint" style="margin:0 0 12px">Tip: enable the true one-click button by setting a GitHub OAuth App id (<code>DL_GITHUB_CLIENT_ID</code>).</p>
+      <a class="btn ghost sm" href="${classicTokenUrl}" target="_blank">Create token on GitHub (repo scope pre-selected)</a>
+      <form class="stack" method="post" action="/github/connect" style="gap:10px;margin-top:12px">
+        <input name="token" type="password" placeholder="paste it here (ghp_... or github_pat_...)" autocomplete="off" required>
+        ${err ? `<div class="warn">${esc(err)}</div>` : ''}
+        <div class="row-actions"><button class="btn" type="submit">Save token</button></div>
+      </form></div>`;
+  }
+
+  // Token fallback is always available (collapsed) when one-click is on.
+  const fallback = GITHUB_CLIENT_ID ? `<details class="tut" style="margin-top:14px"><summary>Prefer a token instead? (no GitHub sign-in)</summary>
+    <div style="padding:14px 16px">
+      <p class="hint" style="margin:0 0 10px">Create a token (the <b>repo</b> scope, read + write, is pre-selected), then paste it:</p>
+      <a class="btn ghost sm" href="${classicTokenUrl}" target="_blank">Create token on GitHub</a>
+      <form class="stack" method="post" action="/github/connect" style="gap:10px;margin-top:12px">
+        <input name="token" type="password" placeholder="paste the token" autocomplete="off" required>
+        <div class="row-actions"><button class="btn ghost" type="submit">Save token</button></div>
+      </form></div></details>` : '';
+
+  const tut = `<div class="sectlabel">How it works</div>
     <div class="card" style="padding:16px 18px"><ol style="margin:0 0 0 18px;color:var(--subtle);font-size:13px;line-height:1.8">
-      <li>Connect once here. The token is stored in a 600 file the runner reads to clone your repos.</li>
-      <li>When you create an agent, pick a repo from your GitHub list (the "Select a repository" field).</li>
-      <li>Each run clones/pulls that repo into the agent's own workspace before the agent starts.</li>
-      <li>Private repos work automatically once connected. The token is never shown again or committed.</li>
+      <li>Connect once. Agents can pull and (for the fork / brand-voice flow) push your repos.</li>
+      <li>When you create an agent, pick a repo from your GitHub list.</li>
+      <li>Each run clones/pulls that repo into the agent's own workspace first.</li>
+      <li>The token is stored in a 600 file the runner reads, never shown again or committed.</li>
     </ol></div>`;
-  const body = `
+
+  const refresh = devActive ? '<meta http-equiv="refresh" content="4">' : '';
+  const body = `${refresh}
     <a class="back" href="/access">< Access &amp; keys</a>
     <h2 class="title">Connect GitHub</h2>
-    <p class="lede">Let your agents pull code from your repositories, and pick repos from a list when you create an agent.</p>
-    ${connected || form}
+    <p class="lede">So your agents can pull and push your repos, and you can pick a repo when creating an agent.</p>
+    ${primary}
+    ${fallback}
     ${tut}`;
   return layout('Connect GitHub', body, 'Connect GitHub');
 }
@@ -1130,7 +1211,7 @@ const server = http.createServer(async (req, res) => {
       const p = path.slice('/provider/'.length);
       return PROVIDERS.includes(p) ? send(res, 200, providerConnectPage(p)) : send(res, 404, layout('Not found', '<div class="empty">Unknown provider</div>'));
     }
-    if (path === '/github') return send(res, 200, githubPage());
+    if (path === '/github') { if (githubDevice()) await ghDevicePoll(); return send(res, 200, githubPage()); }
     // Repo list for the agent form's picker (reads the stored token).
     if (path === '/api/github/repos') {
       const repos = await gh('/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member');
@@ -1173,6 +1254,11 @@ const server = http.createServer(async (req, res) => {
       }
     }
     // Connect GitHub: validate the PAT, then store it (600) + the login (no token).
+    if (path === '/github/oauth-start') {
+      if (!GITHUB_CLIENT_ID) return send(res, 200, githubPage({ error: 'One-click is not configured (no DL_GITHUB_CLIENT_ID). Use a token below.' }));
+      const d = await ghDeviceStart();
+      return d ? redirect(res, '/github') : send(res, 200, githubPage({ error: 'Could not start GitHub sign-in. Try again, or use a token.' }));
+    }
     if (path === '/github/connect') {
       const token = (f.token || '').trim();
       if (!token) return send(res, 200, githubPage({ error: 'Paste a token first.' }));
@@ -1191,6 +1277,7 @@ const server = http.createServer(async (req, res) => {
     if (path === '/github/disconnect') {
       try { if (existsSync(GITHUB_TOKEN_FILE)) writeFileSync(GITHUB_TOKEN_FILE, ''); } catch {}
       try { writeFileSync(GITHUB_JSON, JSON.stringify({ connected: false }, null, 2)); } catch {}
+      clearGithubDevice();
       return redirect(res, '/github');
     }
     if (path === '/routine') {
