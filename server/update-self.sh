@@ -34,7 +34,7 @@ log "updating from $URL"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-FILES="server/run-agent.sh server/agent-jail.sh server/api-call.mjs server/dashboard.mjs server/briefing.mjs server/update-self.sh VERSION"
+FILES="server/run-agent.sh server/agent-jail.sh server/api-call.mjs server/dashboard.mjs server/google.mjs server/connections.mjs server/briefing.mjs server/update-self.sh VERSION"
 for rel in $FILES; do
   if ! curl -fsSL "$URL/$rel" -o "$TMP/$(basename "$rel")"; then
     log "fetch failed: $rel"; status "error" "Failed to fetch $rel - kept current version." "$(cat "$DL_APP/VERSION" 2>/dev/null||echo '')"
@@ -44,6 +44,8 @@ done
 
 # Sanity-gate before swapping anything in: JS must parse, shell must parse.
 node --check "$TMP/dashboard.mjs" || { log "dashboard.mjs failed parse"; status "error" "Downloaded dashboard failed validation - no changes applied." ""; exit 1; }
+node --check "$TMP/google.mjs"    || { log "google.mjs failed parse"; status "error" "Downloaded google connector failed validation - no changes applied." ""; exit 1; }
+node --check "$TMP/connections.mjs" || { log "connections.mjs failed parse"; status "error" "Downloaded connections UI failed validation - no changes applied." ""; exit 1; }
 node --check "$TMP/api-call.mjs"  || { log "api-call.mjs failed parse"; status "error" "Downloaded api-call failed validation - no changes applied." ""; exit 1; }
 node --check "$TMP/briefing.mjs"  || { log "briefing.mjs failed parse"; status "error" "Downloaded briefing failed validation - no changes applied." ""; exit 1; }
 for s in run-agent.sh agent-jail.sh update-self.sh; do
@@ -55,6 +57,8 @@ install -m 0755 "$TMP/run-agent.sh"  "$DL_APP/bin/run-agent.sh"
 install -m 0755 "$TMP/agent-jail.sh" "$DL_APP/bin/agent-jail.sh"
 install -m 0644 "$TMP/api-call.mjs"  "$DL_APP/bin/api-call.mjs"
 install -m 0644 "$TMP/dashboard.mjs" "$DL_APP/bin/dashboard.mjs"
+install -m 0644 "$TMP/google.mjs"    "$DL_APP/bin/google.mjs"
+install -m 0644 "$TMP/connections.mjs" "$DL_APP/bin/connections.mjs"
 install -m 0644 "$TMP/briefing.mjs"  "$DL_APP/bin/briefing.mjs"
 install -m 0755 "$TMP/update-self.sh" "$DL_APP/bin/update-self.sh"
 install -m 0644 "$TMP/VERSION" "$DL_APP/VERSION"

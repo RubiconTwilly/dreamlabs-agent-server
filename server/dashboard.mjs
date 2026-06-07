@@ -16,6 +16,10 @@ import { readFileSync, writeFileSync, existsSync, readdirSync, renameSync, mkdir
 import { spawn, execFileSync } from 'node:child_process';
 import { timingSafeEqual, createHmac, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+// Account-level connectors (BYO OAuth apps). Logic + UI live in their own files
+// so this dashboard stays small and doesn't collide with concurrent design edits.
+import { googleStatus, saveGoogleCreds, buildGoogleAuthUrl, googleHandleCallback, disconnectGoogle, validGoogleToken } from './google.mjs';
+import { connectionsPage, googleConnectionPage, googleCallbackResultPage } from './connections.mjs';
 
 const DATA = process.env.DL_DATA || '/var/dreamlabs';
 const APP = process.env.DL_APP || '/opt/dreamlabs';
@@ -73,10 +77,10 @@ const TEMPLATES = [
 
 // Connector catalog - tutorials are baked in (the customer wires these on their end).
 const CONNECTORS = [
-  { id: 'gmail', name: 'Gmail', icon: '📧', steps: [
-    'In Google Cloud Console, create OAuth credentials (Desktop app) and enable the Gmail API.',
-    'Run the Gmail MCP server on this box: `npx @modelcontextprotocol/server-gmail` and complete the OAuth consent once.',
-    'Add the server to the agent workspace `mcp.json`. The runner exposes it to the agent each run.',
+  { id: 'gmail', name: 'Google (Gmail / Calendar / Drive)', icon: '📧', steps: [
+    'Connect your Google account once under Connections > Google (you create your own Google app - the dashboard walks you through it).',
+    'Tick this connector on the agents that should use it. Each run the agent receives a short-lived GOOGLE_ACCESS_TOKEN (never your client secret or refresh token).',
+    'The agent calls the Gmail / Calendar / Drive REST API with that token, e.g. curl -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" https://gmail.googleapis.com/gmail/v1/users/me/profile',
   ]},
   { id: 'telegram', name: 'Telegram', icon: '✈️', steps: [
     'Create a bot with @BotFather and copy the bot token.',
@@ -122,14 +126,28 @@ function writeRoutines(obj) {
 function getRoutine(id) { return readRoutines().routines.find(r => r.id === id); }
 function providerStatus() { return readJSON(PROVIDERS_FILE, {}); }
 function updateStatus() { return readJSON(UPDATE_STATUS, null); }
-// ---- provider connect: all click, no terminal. OAuth via spawned device-flow ----
-// login commands per provider. oauth caches in HOME (the jail reuses it on this
-// local box); claude prints a token we capture into keys.env.
+// ---- provider connect: all click, no terminal. ----
+// A spawned-CLI device flow only works headless for CODEX: it prints a verification
+// URL + one-time code, needs no stdin, and self-completes (exit 0 + ~/.codex/auth.json).
+// Claude/Grok/Gemini do NOT do a pollable device-code flow here (claude setup-token is an
+// interactive paste-back TUI; grok/gemini open a local browser), so they connect by
+// key/token paste instead (PROVIDER_KEY). Confirmed by live CLI testing 2026-06-07.
+const stripAnsi = (s) => String(s || '').replace(/\u001b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/\u001b\][^\u0007]*\u0007/g, '');
+const hasCli = (bin) => { try { execFileSync(process.platform === 'win32' ? 'where' : 'which', [bin], { stdio: 'ignore' }); return true; } catch { return false; } };
 const PROVIDER_LOGIN = {
-  codex: { cmd: ['codex', 'login', '--device-auth'], oauth: true },
-  grok: { cmd: ['grok', 'auth', 'login'], oauth: true },
-  claude: { cmd: ['claude', 'setup-token'], oauth: true, captureToken: 'CLAUDE_CODE_OAUTH_TOKEN' },
+  codex: {
+    cmd: ['codex', 'login', '--device-auth'], oauth: true,
+    // pull the verification URL + one-time code out of the ANSI-stripped CLI log
+    parse: (raw) => {
+      const c = stripAnsi(raw);
+      const url = (c.match(/https?:\/\/[^\s'"]+/) || [])[0] || '';
+      const code = (c.match(/\b[A-Z0-9]{4,}-[A-Z0-9]{4,}\b/) || c.match(/code[^A-Za-z0-9]{0,4}([A-Z0-9][A-Z0-9-]{4,})/i) || [])[1] || '';
+      return { url, code };
+    },
+  },
 };
+// Anthropic does not allow Claude subscription plans to be used by third-party tools.
+const CLAUDE_TOS_WARN = "Heads up: Anthropic does not permit using a Claude subscription plan (Pro / Max) with third-party tools like this. Use an Anthropic API key from console.anthropic.com here. You can paste a subscription token if you want, but it may breach Anthropic's terms and they can revoke your access.";
 // key-paste: which env var (+ base) a pasted API key maps to.
 const PROVIDER_KEY = {
   claude: { key: 'ANTHROPIC_API_KEY' }, codex: { key: 'OPENAI_API_KEY' },
@@ -155,6 +173,33 @@ function writeKeyEnv(name, val, extra) {
   lines.push(`${name}=${val}`);
   if (extra) for (const [k, v] of Object.entries(extra)) lines.push(`${k}=${v}`);
   writeFileSync(KEYS_ENV, lines.join('\n') + '\n', { mode: 0o600 });
+}
+// Disconnect should not leave the secret behind: drop this provider's namespaced vars.
+function removeKeyEnv(prov) {
+  try {
+    const cur = readFileSync(KEYS_ENV, 'utf8');
+    const drop = new Set(['DL_KEY_' + prov, 'DL_TOKEN_' + prov, 'DL_BASE_' + prov]);
+    const lines = cur.split('\n').filter(l => l && !drop.has(l.split('=')[0]));
+    writeFileSync(KEYS_ENV, lines.length ? lines.join('\n') + '\n' : '', { mode: 0o600 });
+  } catch {}
+}
+// Best-effort, time-boxed key check so a typo'd / expired key never shows green.
+// A network failure is non-fatal (the box may simply have no egress yet) -> accept.
+async function validateKey(prov, key, base, envName) {
+  try {
+    if (prov === 'claude') {
+      if (envName === 'CLAUDE_CODE_OAUTH_TOKEN') return { ok: true }; // subscription token: not API-key-validatable, accept (already warned)
+      const r = await fetch('https://api.anthropic.com/v1/models', { headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' }, signal: AbortSignal.timeout(8000) });
+      return r.ok ? { ok: true } : { ok: false, message: `Anthropic rejected that key (HTTP ${r.status}). Use an API key from console.anthropic.com.` };
+    }
+    if (prov === 'gemini') {
+      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?key=' + encodeURIComponent(key), { signal: AbortSignal.timeout(8000) });
+      return r.ok ? { ok: true } : { ok: false, message: `Google rejected that key (HTTP ${r.status}).` };
+    }
+    const baseUrl = (base || (prov === 'deepseek' ? 'https://api.deepseek.com' : prov === 'grok' ? 'https://api.x.ai' : 'https://api.openai.com')).replace(/\/+$/, '');
+    const r = await fetch(baseUrl + '/v1/models', { headers: { authorization: 'Bearer ' + key }, signal: AbortSignal.timeout(8000) });
+    return r.ok ? { ok: true } : { ok: false, message: `That key was rejected (HTTP ${r.status}). Check the key${prov === 'api' ? ' and the base URL' : ''}.` };
+  } catch { return { ok: true, soft: true }; }
 }
 // Spawn the provider's login flow; the dashboard captures its device code/URL and
 // watches for completion. The user only approves in their browser.
@@ -349,7 +394,20 @@ function readBody(req) {
     req.on('error', () => resolve(''));
   });
 }
-const parseForm = (body) => { const o = {}; new URLSearchParams(body).forEach((v, k) => { o[k] = v; }); return o; };
+// Repeated keys (multi-checkbox groups) collect into an array; single keys stay
+// scalar. buildRoutineFromForm + the connector handlers already expect this shape.
+const parseForm = (body) => { const o = {}; new URLSearchParams(body).forEach((v, k) => { o[k] = (k in o) ? [].concat(o[k], v) : v; }); return o; };
+// External base URL for OAuth redirects: the pinned PUBLIC_URL if set, else derived
+// from how the browser actually reached us (Host + forwarded proto). The customer
+// pastes the resulting redirect URI into their own Google app, so it must match.
+function baseUrl(req) {
+  if (PUBLIC_URL) return PUBLIC_URL.replace(/\/+$/, '');
+  const proto = String(req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim();
+  const host = req.headers.host || `${HOST}:${PORT}`;
+  return `${proto}://${host}`;
+}
+const googleRedirect = (req) => baseUrl(req) + '/connection/google/callback';
+const ui = () => ({ layout, esc });
 
 // ---------- UI (Claude routines design language) ----------
 
@@ -491,6 +549,9 @@ legend{font-size:12px;color:var(--subtle);font-weight:560;padding:0 8px}
 .cred{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid var(--border)}
 .cred:last-child{border-bottom:0}
 .mono-sm{font-family:var(--mono);font-size:12px;color:var(--muted);word-break:break-all}
+.sub{color:var(--subtle);font-size:13px;line-height:1.55;margin:0 auto 14px}
+.cmd{background:var(--field);border:1px solid var(--border);border-radius:var(--r-md);font-family:var(--mono);color:var(--ink);padding:14px 16px;word-break:break-all;font-size:13px;display:inline-block}
+.codebig{font-size:30px;letter-spacing:8px;font-weight:700;text-align:center;padding:16px 22px}
 /* calendar (month grid) */
 .cal-head{display:flex;align-items:center;justify-content:space-between;margin:6px 0 12px;flex-wrap:wrap;gap:10px}
 .cal-month{font-size:15px;font-weight:600;color:var(--muted)}
@@ -565,6 +626,7 @@ function layout(title, inner, crumb) {
       <button type="button" class="themebtn" data-set="classic" title="Classic theme"><span class="sw sw-classic"></span><span class="tlab">Classic</span></button>
       <button type="button" class="themebtn" data-set="dreamlabs" title="Dream Labs theme"><span class="sw sw-dl"></span><span class="tlab">Dream Labs</span></button>
     </div>
+    <a class="navlink" href="/connections">Connections</a>
     <a class="navlink" href="/access">Access &amp; keys</a>
     <a class="navlink" href="/new">+ New routine</a>
   </nav>
@@ -1012,48 +1074,64 @@ function providersPage() {
 
 // Connect one provider: OAuth (spawned device flow, you just approve) or paste a key.
 function providerConnectPage(prov, opts) {
+  opts = opts || {};
   const ps = providerStatus();
   const on = !!ps[prov];
   const st = connectStatus(prov);
-  const canOauth = !!PROVIDER_LOGIN[prov];
+  const spec = PROVIDER_LOGIN[prov];
+  const canOauth = !!spec && hasCli(spec.cmd[0]); // only offer sign-in if the CLI is actually installed
   const canKey = !!PROVIDER_KEY[prov];
-  const log = (() => { try { return readFileSync(connectLog(prov), 'utf8'); } catch { return ''; } })();
-  const linkMatch = log.match(/https?:\/\/\S+/);
+  const label = PROVIDER_LABEL[prov];
+  const KEY_PH = { claude: 'sk-ant-...  (Anthropic API key)', codex: 'sk-...  (OpenAI API key)', grok: 'xai-...  (xAI API key)', gemini: 'AIza...  (Google AI Studio key)', deepseek: 'sk-...  (DeepSeek key)', api: 'your API key' };
+  const claudeWarn = prov === 'claude' ? `<div class="warn">⚠️ <div>${esc(CLAUDE_TOS_WARN)}</div></div>` : '';
+  const keyForm = () => `<form class="stack" method="post" action="/provider/key/${prov}" style="gap:10px;margin-top:0">
+      <label class="field"><span class="lab">${canOauth ? '…or paste an API key' : (prov === 'claude' ? 'Anthropic API key' : 'API key')}</span>
+        <input name="key" type="password" placeholder="${esc(KEY_PH[prov] || 'API key')}" autocomplete="off" required></label>
+      ${prov === 'api' ? '<label class="field"><span class="lab">Base URL</span><input name="base" placeholder="https://api.openai.com"></label>' : ''}
+      <div class="row-actions"><button class="btn" type="submit">Connect</button></div></form>`;
   let main;
-  if (st && st.state === 'pending') {
-    main = `<div class="card" style="padding:18px">
-      <div class="r-name" style="margin-bottom:10px">Waiting for you to approve in your browser…</div>
-      ${linkMatch ? `<a class="btn" href="${esc(linkMatch[0])}" target="_blank">Open the approval page</a>` : ''}
-      <div class="log" style="margin-top:14px">${esc(log || 'Starting…')}</div>
-      <p class="hint" style="margin-top:10px">This page checks every few seconds. Approve with your ${esc(PROVIDER_LABEL[prov])} account and it connects itself.</p>
-    </div>`;
-  } else if (on) {
+  if (on) {
     main = `<div class="card" style="padding:16px 18px"><div class="cred" style="border:0;padding:0">
-      <span>Connected${ps.default === prov ? ' <span class="pill live">default</span>' : ''}</span>
+      <span><span class="pill live"><span class="dotmark"></span>connected</span>${ps.default === prov ? ' <span class="pill">default</span>' : ''}</span>
       <span class="row-actions">
         ${ps.default === prov ? '' : `<form method="post" action="/provider/default/${prov}"><button class="btn ghost sm">Make default</button></form>`}
         <form method="post" action="/provider/disconnect/${prov}"><button class="btn ghost sm">Disconnect</button></form>
       </span></div></div>`;
+  } else if (canOauth && st && st.state === 'pending') {
+    const raw = (() => { try { return readFileSync(connectLog(prov), 'utf8'); } catch { return ''; } })();
+    const parsed = spec.parse ? spec.parse(raw) : { url: (stripAnsi(raw).match(/https?:\/\/\S+/) || [])[0] || '', code: '' };
+    const stale = st.at && (Date.now() - new Date(st.at).getTime() > 15 * 60 * 1000);
+    if (stale) {
+      main = `<div class="warn">⚠️ <div>That sign-in timed out before you approved it.</div></div>
+        <div class="card" style="padding:18px"><form method="post" action="/provider/connect/${prov}"><button class="btn">Start again</button></form></div>`;
+    } else if (parsed.url || parsed.code) {
+      main = `<div class="card" style="padding:24px 18px;text-align:center">
+        <p class="lede" style="margin:0 auto 16px">Go to ${parsed.url ? `<a href="${esc(parsed.url)}" target="_blank"><b>${esc(parsed.url)}</b></a>` : `the ${esc(label)} sign-in page`} and enter this code:</p>
+        ${parsed.code ? `<div class="cmd codebig">${esc(parsed.code)}</div>` : '<p class="hint">Open the link and approve; this page connects itself.</p>'}
+        ${parsed.url ? `<div style="margin-top:16px"><a class="btn" href="${esc(parsed.url)}" target="_blank">Open ${esc(label)}</a></div>` : ''}
+        <p class="hint" style="margin-top:14px">Waiting for you to approve. This page checks every few seconds and connects itself.</p>
+      </div>`;
+    } else {
+      main = `<div class="card" style="padding:18px"><div class="r-name" style="margin-bottom:8px">Starting sign-in…</div>
+        <p class="hint">Fetching your one-time code from ${esc(label)}. This page refreshes automatically.</p></div>`;
+    }
   } else {
-    const failed = st && st.state === 'failed' ? `<div class="warn">⚠️ <div>Last attempt failed${st.error ? ': ' + esc(st.error) : ''}. Make sure the ${esc(PROVIDER_LABEL[prov])} CLI is installed, then retry.</div></div>` : '';
-    main = `${failed}<div class="card" style="padding:18px">
-      ${canOauth ? `<form method="post" action="/provider/connect/${prov}"><button class="btn">Connect ${esc(PROVIDER_LABEL[prov])} (sign in)</button>
-        <span class="hint" style="margin-left:10px">Opens an approval page. No terminal.</span></form>` : ''}
+    const failed = st && st.state === 'failed' ? `<div class="warn">⚠️ <div>Last attempt failed${st.error ? ': ' + esc(st.error) : ''}.${canOauth ? ` Make sure the ${esc(label)} CLI is installed, or paste a key instead.` : ''}</div></div>` : '';
+    const keyErr = opts.keyError ? `<div class="warn">⚠️ <div>${esc(opts.keyError)}</div></div>` : '';
+    main = `${failed}${claudeWarn}${keyErr}<div class="card" style="padding:18px">
+      ${canOauth ? `<form method="post" action="/provider/connect/${prov}"><button class="btn">Connect ${esc(label)} (sign in)</button>
+        <span class="hint" style="margin-left:10px">We run the flow, you just approve in your browser. No terminal.</span></form>` : ''}
       ${canOauth && canKey ? '<div style="height:14px"></div>' : ''}
-      ${canKey ? `<form class="stack" method="post" action="/provider/key/${prov}" style="gap:10px;margin-top:0">
-        <label class="field"><span class="lab">…or paste an API key</span>
-          <input name="key" type="password" placeholder="${esc(PROVIDER_KEY[prov].key)}" autocomplete="off" required></label>
-        ${prov === 'api' ? '<label class="field"><span class="lab">Base URL</span><input name="base" placeholder="https://api.openai.com"></label>' : ''}
-        <div class="row-actions"><button class="btn ghost" type="submit">Save key</button></div></form>` : ''}
+      ${canKey ? keyForm() : ''}
     </div>`;
   }
-  const refresh = (st && st.state === 'pending') ? '<meta http-equiv="refresh" content="3">' : '';
+  const refresh = (canOauth && !on && st && st.state === 'pending') ? '<meta http-equiv="refresh" content="3">' : '';
   const body = `${refresh}
-    <a class="back" href="/providers">< AI providers</a>
-    <h2 class="title">${esc(PROVIDER_LABEL[prov])}</h2>
-    <p class="lede">Connect by signing in (we run the flow, you just approve) or paste a key. Connecting adds it; your other providers stay.</p>
+    <a class="back" href="/providers">&lt; AI providers</a>
+    <h2 class="title">${esc(label)}</h2>
+    <p class="lede">${canOauth ? 'Connect by signing in (we run the flow, you just approve) or paste a key.' : 'Paste your ' + esc(label) + ' API key to connect.'} Connecting adds it; your other providers stay.</p>
     ${main}`;
-  return layout('Connect ' + PROVIDER_LABEL[prov], body, esc(PROVIDER_LABEL[prov]));
+  return layout('Connect ' + label, body, esc(label));
 }
 
 // "See your keys" - STATUS + access link only. Never prints provider secrets.
@@ -1113,6 +1191,13 @@ async function accessPage() {
   <div class="sectlabel">AI providers</div>
   <div class="card">${provRows}</div>
   <p class="hint" style="margin-top:10px"><a href="/providers">Connect more providers or swap the default</a> - all by click, no terminal. Your first provider was set up during install.</p>
+
+  <div class="sectlabel">Connected apps</div>
+  <div class="card"><div class="cred"><span>📧 Google <span class="tert">· Gmail, Calendar, Drive</span></span>
+    ${(() => { const gx = googleStatus(); return gx.connected
+      ? `<span class="row-actions"><span class="pill live"><span class="dotmark"></span>connected${gx.email ? ' · ' + esc(gx.email) : ''}</span> <a class="btn ghost sm" href="/connection/google">Manage</a></span>`
+      : '<a class="btn sm" href="/connections">Connect</a>'; })()}</div></div>
+  <p class="hint" style="margin-top:10px"><a href="/connections">Connect Gmail, Calendar and Drive</a> with your own Google account - agents get a short-lived token only when a routine needs it.</p>
 
   <div class="sectlabel">Source control</div>
   <div class="card">${ghRow}</div>
@@ -1209,6 +1294,15 @@ const server = http.createServer(async (req, res) => {
     return json(res, 202, { ok: true, triggered: id });
   }
 
+  // Google OAuth callback. Exempt from cookie auth on purpose: the dl_token cookie
+  // is SameSite=Strict, so it is withheld on the cross-site redirect back from
+  // Google. Instead this is authenticated by the one-time `state` we issued and
+  // stored when the (authed) user clicked Connect - standard OAuth CSRF binding.
+  if (path === '/connection/google/callback' && method === 'GET') {
+    const result = await googleHandleCallback(url.searchParams);
+    return send(res, result.ok ? 200 : 400, googleCallbackResultPage(ui(), result));
+  }
+
   // Everything below requires auth.
   if (!authed(req)) {
     return send(res, 401, layout('Unauthorized',
@@ -1219,6 +1313,23 @@ const server = http.createServer(async (req, res) => {
     if (path === '/') return send(res, 200, pageList(url.searchParams.get('view'), parseInt(url.searchParams.get('mo') || '0', 10) || 0));
     if (path === '/new') return send(res, 200, formPage(null, url.searchParams.get('prefill') || ''));
     if (path === '/access') return send(res, 200, await accessPage());
+    if (path === '/connections') return send(res, 200, connectionsPage(ui()));
+    if (path === '/connection/google') return send(res, 200, googleConnectionPage(ui(), { redirect: googleRedirect(req) }));
+    if (path === '/connection/google/connect') {
+      const u = buildGoogleAuthUrl(googleRedirect(req));
+      return u ? redirect(res, u) : send(res, 200, googleConnectionPage(ui(), { redirect: googleRedirect(req), error: 'Save your Client ID and secret first.' }));
+    }
+    if (path === '/connection/google/test') {
+      const tok = await validGoogleToken();
+      let tested = 'Could not mint a token. Try reconnecting Google.';
+      if (tok) {
+        try {
+          const r = await fetch('https://openidconnect.googleapis.com/v1/userinfo', { headers: { authorization: 'Bearer ' + tok }, signal: AbortSignal.timeout(8000) });
+          tested = r.ok ? ('Token works - Google replied for ' + ((await r.json()).email || 'your account') + '.') : ('Google returned HTTP ' + r.status + '.');
+        } catch { tested = 'Could not reach Google from this box.'; }
+      }
+      return send(res, 200, googleConnectionPage(ui(), { redirect: googleRedirect(req), tested }));
+    }
     if (path === '/providers') return send(res, 200, providersPage());
     if (path.startsWith('/provider/')) {
       const p = path.slice('/provider/'.length);
@@ -1259,11 +1370,20 @@ const server = http.createServer(async (req, res) => {
         if (act === 'connect') { startProviderConnect(prov); return redirect(res, '/provider/' + prov); }
         if (act === 'key') {
           const key = (f.key || '').trim(); const spec = PROVIDER_KEY[prov];
-          if (key && spec) { const extra = (prov === 'api' && f.base) ? { API_BASE_URL: f.base.trim() } : (spec.base ? { API_BASE_URL: spec.base } : null); writeKeyEnv(spec.key, key, extra); setProviderConnected(prov, true); }
+          if (!key || !spec) return redirect(res, '/provider/' + prov);
+          // Claude: a subscription token (sk-ant-oat...) is an OAuth token, not an API key.
+          const isClaudeToken = prov === 'claude' && /^sk-ant-oat/i.test(key);
+          const base = (prov === 'api' && f.base) ? f.base.trim() : (spec.base || '');
+          const v = await validateKey(prov, key, base, isClaudeToken ? 'CLAUDE_CODE_OAUTH_TOKEN' : spec.key);
+          if (!v.ok) return send(res, 200, providerConnectPage(prov, { keyError: v.message }));
+          // namespaced per provider so two OpenAI-compatible providers never collide (the runner maps these back)
+          const scoped = isClaudeToken ? 'DL_TOKEN_claude' : 'DL_KEY_' + prov;
+          writeKeyEnv(scoped, key, base ? { ['DL_BASE_' + prov]: base } : null);
+          setProviderConnected(prov, true);
           return redirect(res, '/provider/' + prov);
         }
         if (act === 'default') { setProviderConnected(prov, true, true); return redirect(res, '/providers'); }
-        if (act === 'disconnect') { setProviderConnected(prov, false); return redirect(res, '/providers'); }
+        if (act === 'disconnect') { setProviderConnected(prov, false); removeKeyEnv(prov); return redirect(res, '/providers'); }
       }
     }
     // Connect GitHub: validate the PAT, then store it (600) + the login (no token).
@@ -1292,6 +1412,16 @@ const server = http.createServer(async (req, res) => {
       try { writeFileSync(GITHUB_JSON, JSON.stringify({ connected: false }, null, 2)); } catch {}
       clearGithubDevice();
       return redirect(res, '/github');
+    }
+    // Google connector: save the customer's own OAuth app creds (+ scopes + redirect), or disconnect.
+    if (path === '/connection/google/creds') {
+      const scopeKeys = f.scopeKeys ? (Array.isArray(f.scopeKeys) ? f.scopeKeys : [f.scopeKeys]) : [];
+      saveGoogleCreds({ clientId: f.clientId, clientSecret: f.clientSecret, scopeKeys, redirectUri: (f.redirectUri || '').trim() || googleRedirect(req) });
+      return redirect(res, '/connection/google');
+    }
+    if (path === '/connection/google/disconnect') {
+      await disconnectGoogle();
+      return redirect(res, '/connection/google');
     }
     if (path === '/routine') {
       const data = readRoutines();

@@ -191,6 +191,25 @@ printf '%s' "$INSTRUCTIONS" > "$INSTRFILE"
 chmod 640 "$INSTRFILE" 2>/dev/null || true
 chgrp dlws "$INSTRFILE" 2>/dev/null || true
 
+# ---------- connector tokens ----------
+# Mint a SHORT-LIVED Google access token only if this routine ticked the Google
+# connector. The refresh token + client secret stay in the dashboard's 600
+# connector file and are never handed to the jailed agent - only this token is.
+CONNECTORS_CSV="$(jfield '(.connectors // []) | join(",")')"
+GOOGLE_ACCESS_TOKEN=""
+case ",$CONNECTORS_CSV," in
+  *,gmail,*|*,google,*)
+    if [ -f "$DL_DATA/connectors/google.json" ]; then
+      GOOGLE_ACCESS_TOKEN="$(node "$DL_APP/bin/google.mjs" token 2>>"$LOG" || true)"
+      if [ -n "$GOOGLE_ACCESS_TOKEN" ]; then echo "--- google connector: access token minted ---" >> "$LOG"
+      else echo "--- google connector ticked but no valid token (reconnect Google in the dashboard) ---" >> "$LOG"; fi
+    else
+      echo "--- google connector ticked but Google is not connected yet ---" >> "$LOG"
+    fi
+    ;;
+esac
+export GOOGLE_ACCESS_TOKEN
+
 START_S=$SECONDS
 set +e
 run_with_timeout "$TIMEOUT_SECS" \

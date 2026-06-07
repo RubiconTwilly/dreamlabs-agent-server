@@ -38,26 +38,30 @@ ENVV=(
 )
 add(){ if [ -n "${2:-}" ]; then ENVV+=("$1=$2"); fi; }   # must return 0 (set -e)
 
+# Per-provider credentials. Dashboard-connected keys are NAMESPACED (DL_KEY_<prov>,
+# DL_BASE_<prov>, DL_TOKEN_claude) so two OpenAI-compatible providers can never clobber
+# each other's key; installer-set flat vars (ANTHROPIC_API_KEY / OPENAI_API_KEY / ...)
+# are the fallback. The generic runner is OpenAI-compatible ONLY - never Anthropic.
 case "$PROV" in
   claude)
-    add ANTHROPIC_API_KEY "${ANTHROPIC_API_KEY:-}"
-    add CLAUDE_CODE_OAUTH_TOKEN "${CLAUDE_CODE_OAUTH_TOKEN:-}"
+    add ANTHROPIC_API_KEY "${DL_KEY_claude:-${ANTHROPIC_API_KEY:-}}"
+    add CLAUDE_CODE_OAUTH_TOKEN "${DL_TOKEN_claude:-${CLAUDE_CODE_OAUTH_TOKEN:-}}"
     CMD=(claude -p "$INSTR" --output-format text --dangerously-skip-permissions)
     [ -n "$MODEL" ] && CMD+=(--model "$MODEL")
     ;;
   codex)
-    add OPENAI_API_KEY "${OPENAI_API_KEY:-}"
+    add OPENAI_API_KEY "${DL_KEY_codex:-${OPENAI_API_KEY:-}}"
     add CODEX_HOME "${CODEX_HOME:-}"
     CMD=(codex exec "$INSTR" --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check)
     [ -n "$MODEL" ] && CMD+=(-m "$MODEL")
     ;;
   grok)
     # Official Grok Build CLI. OAuth session in ~/.grok/auth, or XAI_API_KEY.
-    add XAI_API_KEY "${XAI_API_KEY:-}"
+    add XAI_API_KEY "${DL_KEY_grok:-${XAI_API_KEY:-}}"
     CMD=(grok -p "$INSTR" --always-approve)
     ;;
   gemini)
-    add GEMINI_API_KEY "${GEMINI_API_KEY:-}"
+    add GEMINI_API_KEY "${DL_KEY_gemini:-${GEMINI_API_KEY:-}}"
     add GOOGLE_API_KEY "${GOOGLE_API_KEY:-}"
     add GOOGLE_APPLICATION_CREDENTIALS "${GOOGLE_APPLICATION_CREDENTIALS:-}"
     add GOOGLE_CLOUD_PROJECT "${GOOGLE_CLOUD_PROJECT:-}"
@@ -65,16 +69,23 @@ case "$PROV" in
     CMD=(gemini -p "$INSTR" --yolo)
     [ -n "$MODEL" ] && CMD+=(-m "$MODEL")
     ;;
+  deepseek)
+    add OPENAI_API_KEY "${DL_KEY_deepseek:-${OPENAI_API_KEY:-}}"
+    add API_BASE_URL "${DL_BASE_deepseek:-${API_BASE_URL:-https://api.deepseek.com}}"
+    CMD=(node "$DL_APP/bin/api-call.mjs" "$INSTRFILE" "$MODEL")
+    ;;
   *)
-    # Generic OpenAI-compatible runner: deepseek, minimax, kimi, xAI-as-API, or
-    # any base URL. The installer stores the chosen key as OPENAI_API_KEY +
-    # API_BASE_URL so this one path covers them all.
-    add ANTHROPIC_API_KEY "${ANTHROPIC_API_KEY:-}"
-    add OPENAI_API_KEY "${OPENAI_API_KEY:-}"
-    add API_BASE_URL "${API_BASE_URL:-}"
+    # Generic OpenAI-compatible runner (the `api` provider / any base URL). NEVER Anthropic.
+    add OPENAI_API_KEY "${DL_KEY_api:-${OPENAI_API_KEY:-}}"
+    add API_BASE_URL "${DL_BASE_api:-${API_BASE_URL:-}}"
     CMD=(node "$DL_APP/bin/api-call.mjs" "$INSTRFILE" "$MODEL")
     ;;
 esac
+
+# Connector tokens (only present when the routine ticked that connector). These
+# are SHORT-LIVED access tokens minted by the runner - never a refresh token or
+# client secret, which stay in the dashboard's 600 connector file out of reach.
+add GOOGLE_ACCESS_TOKEN "${GOOGLE_ACCESS_TOKEN:-}"
 
 cd "$WS"
 # env -i: hard reset of the environment, then apply ONLY the allowlist, so the

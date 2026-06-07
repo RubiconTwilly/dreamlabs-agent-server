@@ -1,7 +1,8 @@
 # Dream Labs Agent Server - Self-Hosted, Bring-Your-Own-AI Track
 
-**Status: LIVE, v0.9.2 (updated 2026-06-07).** Build + handoff doc - hand it to a dev to extend.
+**Status: LIVE, v0.10.0 (updated 2026-06-07).** Build + handoff doc - hand it to a dev to extend.
 
+- **NEW in v0.10.0 - Connectors (account-level, bring-your-own OAuth app):** the first real third-party connector is built: **Google (Gmail, Calendar, Drive)** via the full OAuth authorization-code flow against the customer's OWN Google Cloud app (no Google verification needed - it is their app, their data; the dashboard walkthrough guides the setup). Connect once under **Connections > Google**; any routine that ticks the Google connector then receives a short-lived `GOOGLE_ACCESS_TOKEN` at run time. Secrets (client secret + refresh token) live in a 600 file the agent never sees. Microsoft 365, Square, ActiveCampaign are stubbed as "soon". See section 4.1.
 - **Distribution (LIVE):** **https://get.joindreamlabs.com** - the setup wizard at `/`, the installer at `/install.sh`, and all server files, served by an Apache vhost on the EC2 box (`13.236.39.21`) with Let's Encrypt SSL. **Installs and self-updates pull from here, NOT GitHub.** Redeploy after code changes with `bash deploy.sh` (rsyncs the docroot; does not touch Apache).
 - **Install (one line):** `curl -fsSL https://get.joindreamlabs.com/install.sh | bash` (auto-detects macOS vs Linux; cloud VPS or local Mac/Linux). It auto-opens the dashboard at the end.
 - **Repo (dev source, public, MIT):** https://github.com/RubiconTwilly/dreamlabs-agent-server - this is just version control; at launch move the product repos to a `dreamlabs` GitHub org (do NOT rename the personal account - other things are tied to it). See section 12.
@@ -58,6 +59,8 @@ ownership upgrade. Do not gate the core experience behind a server.
 | Per-routine AI picker | DONE | explicit "Which AI runs this agent?" field on the create form (Claude/Codex/Grok/Gemini/DeepSeek/API) |
 | Repo picker + per-agent clone | DONE | lists your real repos once GitHub is connected; each routine clones its own repo |
 | Dream Labs template gallery in the create form | DONE | public templates clone with no token |
+| Connectors: Google (Gmail/Calendar/Drive) | DONE | account-level OAuth, BYO Google app; `/connections` + `/connection/google`; per-routine token injection. See 4.1 |
+| Connectors: Microsoft 365, Square, ActiveCampaign | STUB | listed as "soon" on `/connections`; same adapter pattern as Google |
 | Calendar tab (Google-Calendar month grid) | DONE | day cells, TODAY highlight, high-freq collapse to "x N", month nav |
 | Daily Briefing (run-health insights) | DONE (box side) | computed; dashboard card; delivers via Dream Labs relay (section 11); DL backend relay = the dev's piece |
 | Self-update ("Update" button + CLI) | DONE | dashboard requests, root task validates + applies |
@@ -66,11 +69,12 @@ ownership upgrade. Do not gate the core experience behind a server.
 | Dashboard themes | DONE | Classic (warm-dark) + Dream Labs (navy) switcher in the header |
 | Audit | DONE | `AUDIT.md` (fixed F1, F2, B1-B4; known limits listed) |
 
-Queue (not yet built): the DL backend relay endpoint + bot for the Daily Briefing
-(section 11); the DL-hosted-templates "fork + upload my files" skeleton; the GitHub
-App per-repo-per-run tier (optional upgrade beyond the OAuth device flow); the
-wizard provisioning a Dream Labs backend key; AI-narrative enrichment for the
-briefing. See section 9.
+Queue (not yet built): more connectors (Microsoft 365 / Outlook, Square,
+ActiveCampaign - same pattern as Google, section 4.1); the DL backend relay
+endpoint + bot for the Daily Briefing (section 11); the DL-hosted-templates "fork +
+upload my files" skeleton; the GitHub App per-repo-per-run tier (optional upgrade
+beyond the OAuth device flow); the wizard provisioning a Dream Labs backend key;
+AI-narrative enrichment for the briefing. See section 9.
 
 ---
 
@@ -136,6 +140,55 @@ Customer box (Ubuntu VPS or macOS, localhost)
   - **Templates:** the create form leads with Dream Labs template cards (public repos)
     that fill the repo + a starting prompt + a name. Or use your own repo.
   - **Self-update** (`/access`): an Update button. **Theme switcher** (Classic / Dream Labs) in the header.
+  - **Connected apps** (`/connections`): account-level third-party connectors (see 4.1).
+
+---
+
+## 4.1 Connectors (account-level, bring-your-own OAuth app)
+
+The customer connects a third-party account ONCE, then any routine that ticks that
+connector gets access at run time. First connector built: **Google (Gmail,
+Calendar, Drive)**. Files: `server/google.mjs` (OAuth + token logic + runner CLI)
+and `server/connections.mjs` (the UI), kept OUT of `dashboard.mjs` so connector
+work doesn't collide with design edits.
+
+**Why bring-your-own Google app (not one Dream Labs app):** Gmail/Drive are
+"sensitive/restricted" scopes; a shared OAuth client would need Google
+verification (a long review). Instead each customer makes their OWN Google Cloud
+OAuth app - their consent screen, their data, no verification. The dashboard
+walkthrough (`/connection/google`) guides every step and shows the exact redirect
+URI to paste. **Same model will apply to Microsoft/Square/ActiveCampaign.**
+
+**Flow:** `/connection/google` (walkthrough + creds form) -> save client id/secret +
+scope choice (`POST /connection/google/creds`) -> `GET /connection/google/connect`
+(builds the consent URL with `access_type=offline&prompt=consent` so a refresh
+token is always returned, stores a one-time `state`, 302s to Google) -> Google
+redirects to `GET /connection/google/callback` -> exchange code for tokens, fetch
+identity, persist. `/connection/google/test` mints a token and pings userinfo.
+
+**The SameSite gotcha (important):** the `dl_token` cookie is `SameSite=Strict`, so
+it is WITHHELD on Google's cross-site redirect back to the callback. The callback
+is therefore exempt from cookie auth and instead authenticated by the one-time
+`state` we issued when the (authed) user clicked Connect - the standard OAuth CSRF
+binding. (This is why GitHub uses device flow here; Google can't, because its
+device flow doesn't support Gmail/Drive scopes.)
+
+**The other classic gotcha (in the walkthrough):** the OAuth app must be set to
+**"In production"**, not "Testing" - Testing expires refresh tokens after 7 days.
+
+**Security (the $6k rules hold):** client secret + refresh token live in
+`data/connectors/google.json` (600, dreamlabs-owned). The dashboard reads them to
+run the flow + refresh; **the agent jail never sees them.** At run time the runner
+mints a SHORT-LIVED access token (`node google.mjs token`) only if the routine
+ticked the Google connector, and `agent-jail.sh` forwards just
+`GOOGLE_ACCESS_TOKEN` into the env allowlist. The agent calls Google's REST APIs
+with it, e.g. `curl -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN"
+https://gmail.googleapis.com/gmail/v1/users/me/profile`.
+
+**To add a connector:** copy `google.mjs` (swap endpoints/scopes), add a render
+function + `APPS` entry in `connections.mjs`, add the routes in `dashboard.mjs`
+(GET page/connect/callback + POST creds/disconnect), and a runner branch in the
+`case ",$CONNECTORS_CSV,"` block to inject its token.
 
 ---
 
@@ -152,9 +205,11 @@ dreamlabs-agent-server/
 ├── wizard/index.html      the setup wizard (static; host at get.joindreamlabs.com)
 ├── workspace-seed/        sample SOUL.md + mcp.json for repo-less agents
 ├── server/
-│   ├── dashboard.mjs      THE dashboard (UI + all routes). Single file. (~1100 lines)
-│   ├── run-agent.sh       provider runner + loop contracts + per-routine git
-│   ├── agent-jail.sh      env-allowlist jail; provider command per type
+│   ├── dashboard.mjs      THE dashboard (UI + all routes). Single file. (~1350 lines)
+│   ├── google.mjs         Google connector: OAuth + token refresh + runner CLI (`token`)
+│   ├── connections.mjs    "Connected apps" UI (Google + stubs), reuses dashboard chrome
+│   ├── run-agent.sh       provider runner + loop contracts + per-routine git + connector tokens
+│   ├── agent-jail.sh      env-allowlist jail; provider command per type; forwards GOOGLE_ACCESS_TOKEN
 │   ├── api-call.mjs       generic OpenAI-compatible runner (deepseek/any)
 │   └── update-self.sh     root self-updater (validates downloads, restarts)
 └── screenshots/           list/new/access/detail/wizard/calendar
@@ -248,9 +303,14 @@ Confirmed with the owner 2026-06-07:
 Done since the first cut (no longer queue): Calendar month grid (v0.8.0), Daily
 Briefing box-side (v0.9.0), get.joindreamlabs.com hosting + SSL (v0.9.2), wizard
 paper-clay-blue theme + logo + Skip-provider, one-click GitHub OAuth (read+write),
-per-provider Connect buttons, clearer per-routine AI picker.
+per-provider Connect buttons, clearer per-routine AI picker, **Google connector
+(Gmail/Calendar/Drive) via BYO OAuth app (v0.10.0)**.
 
 Remaining:
+0. **More connectors** (next): Microsoft 365 / Outlook, Square, ActiveCampaign -
+   each follows the Google pattern in section 4.1 (BYO OAuth app or API key ->
+   `connections.mjs` entry + a `<name>.mjs` module + routes + a runner token branch).
+   They are already stubbed as "soon" on `/connections`.
 1. **DL backend relay for the Daily Briefing** (the dev's piece): the endpoint + the
    Dream Labs Telegram bot + the box-to-owner chat mapping. Box side is done; contract in section 11.
 2. **DL-hosted templates + "fork + upload my files" skeleton.** One-click "Fork this

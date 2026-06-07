@@ -44,26 +44,22 @@ async function post(url, headers, body) {
 }
 
 async function main() {
-  if (process.env.ANTHROPIC_API_KEY) {
-    const data = await post(
-      (process.env.API_BASE_URL || 'https://api.anthropic.com') + '/v1/messages',
-      { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-      { model: model || 'claude-sonnet-4-6', max_tokens: 8192, messages: [{ role: 'user', content: instructions }] },
-    );
-    process.stdout.write((data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n') + '\n');
-  } else if (process.env.OPENAI_API_KEY) {
-    // Works for OpenAI and any OpenAI-compatible endpoint via API_BASE_URL
-    // (xAI, DeepSeek, MiniMax, local gateways, ...).
-    const data = await post(
-      (process.env.API_BASE_URL || 'https://api.openai.com') + '/v1/chat/completions',
-      { authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
-      { model: model || 'gpt-4o-mini', messages: [{ role: 'user', content: instructions }] },
-    );
-    process.stdout.write((data.choices?.[0]?.message?.content || '') + '\n');
-  } else {
-    console.error('no provider key in environment (ANTHROPIC_API_KEY or OPENAI_API_KEY)');
+  // This is the GENERIC OpenAI-compatible runner only (the `api` / deepseek path).
+  // It must NEVER reach for ANTHROPIC_API_KEY - Claude runs via the `claude` CLI,
+  // not here. Routing by env-var presence used to let an Anthropic key hijack every
+  // generic routine; routing is now strictly OpenAI-compatible.
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('no API key in environment (OPENAI_API_KEY). The generic runner is OpenAI-compatible only.');
     process.exit(2);
   }
+  // Works for OpenAI and any OpenAI-compatible endpoint via API_BASE_URL
+  // (xAI, DeepSeek, MiniMax, local gateways, ...).
+  const data = await post(
+    (process.env.API_BASE_URL || 'https://api.openai.com') + '/v1/chat/completions',
+    { authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+    { model: model || 'gpt-4o-mini', messages: [{ role: 'user', content: instructions }] },
+  );
+  process.stdout.write((data.choices?.[0]?.message?.content || '') + '\n');
 }
 
 main().catch(e => { console.error('api-call failed:', e.message); process.exit(1); });
