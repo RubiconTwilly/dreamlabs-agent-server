@@ -24,7 +24,15 @@
 #   DL_SOURCE    install from a local checkout instead of GitHub
 set -euo pipefail
 
-if [ "$(id -u)" -ne 0 ]; then echo "This installer needs root. Re-running with sudo..."; exec sudo -E bash "$0" "$@"; fi
+# macOS -> hand off to the native (local, no-root, launchd) installer so the same
+# one-line wizard command works on a Mac.
+if [ "$(uname)" = "Darwin" ]; then
+  SELFDIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd || echo /tmp)"
+  if [ -f "$SELFDIR/install-macos.sh" ]; then exec bash "$SELFDIR/install-macos.sh" "$@"; fi
+  exec bash -c "$(curl -fsSL "${DL_SOURCE:-https://raw.githubusercontent.com/RubiconTwilly/dreamlabs-agent-server/main}/install-macos.sh")" "$@"
+fi
+
+if [ "$(id -u)" -ne 0 ]; then echo "This installer needs root (Linux). Re-running with sudo..."; exec sudo -E bash "$0" "$@"; fi
 
 DL_APP=/opt/dreamlabs
 DL_DATA=/var/dreamlabs
@@ -130,34 +138,22 @@ esac
 MODEL="${DL_MODEL:-}"
 ok "provider configured ($AUTH)"
 
-# ----- 5. repo + brain -----
-say "Agent workspace"
-REPO="${DL_REPO:-$(ask 'Git repo to clone' "$STARTER_DEFAULT")}"
-GITHUB_TOKEN="$(secret_in 'GitHub token for private clone/pull (blank if public)')"
-CLONE_URL="$REPO"; [ -n "$GITHUB_TOKEN" ] && CLONE_URL="$(echo "$REPO" | sed -E "s#https://#https://x-access-token:$GITHUB_TOKEN@#")"
-rm -rf "$DL_APP/workspace"
-if git clone --depth 1 "$CLONE_URL" "$DL_APP/workspace" >/dev/null 2>&1; then
-  # F2: never persist the token in the group-readable workspace/.git/config.
-  # Reset the remote to the clean URL, and stash the credential in the service
-  # user's own 600 store so unattended pulls work but the jailed agent can't read it.
-  git -C "$DL_APP/workspace" remote set-url origin "$REPO" >/dev/null 2>&1 || true
-  if [ -n "$GITHUB_TOKEN" ]; then
-    printf 'https://x-access-token:%s@github.com\n' "$GITHUB_TOKEN" > "/home/$SVC_USER/.git-credentials"
-    chown "$SVC_USER":"$SVC_USER" "/home/$SVC_USER/.git-credentials"; chmod 600 "/home/$SVC_USER/.git-credentials"
-    sudo -u "$SVC_USER" git config --global credential.helper store >/dev/null 2>&1 || true
-  fi
-  ok "cloned $REPO"
-else
-  warn "clone failed - seeding a workspace with a sample SOUL"; mkdir -p "$DL_APP/workspace"
-  fetch workspace-seed/SOUL.md "$DL_APP/workspace/SOUL.md" 2>/dev/null || echo "# Agent brain" > "$DL_APP/workspace/SOUL.md"
-  fetch workspace-seed/mcp.json "$DL_APP/workspace/mcp.json" 2>/dev/null || true
-fi
+# ----- 5. default workspace (repos are added PER AGENT from the dashboard) -----
+# The installer sets up the platform only. No repo, schedule, or agent here -
+# the customer creates agents in the dashboard, each with its own repo + schedule.
+say "Seeding the default workspace (the shared SOUL for repo-less agents)"
+mkdir -p "$DL_APP/workspace"
+fetch workspace-seed/SOUL.md "$DL_APP/workspace/SOUL.md" 2>/dev/null || echo "# Agent brain" > "$DL_APP/workspace/SOUL.md"
+fetch workspace-seed/mcp.json "$DL_APP/workspace/mcp.json" 2>/dev/null || true
+GITHUB_TOKEN="${DL_GITHUB_TOKEN:-}"   # optional; for private repos. Add later via secrets.env / the GitHub connector.
+ok "workspace ready (add per-agent repos from the dashboard)"
 
 # ----- 6. networking -----
+# Local is the default and lowest-risk: bind localhost, token auth, no firewall.
 NCHOICE="${DL_ACCESS:-}"
 if [ -z "$NCHOICE" ]; then
-  say "How will you reach the dashboard?"; echo "    1) Tailscale only (recommended)   2) Firewall to my IP"
-  case "$(ask 'Access 1/2' '1')" in 2) NCHOICE=firewall;; *) NCHOICE=tailscale;; esac
+  say "How will you reach the dashboard?"; echo "    1) Local only (this machine, no firewall)   2) Tailscale   3) Firewall to my IP"
+  case "$(ask 'Access 1/2/3' '1')" in 2) NCHOICE=tailscale;; 3) NCHOICE=firewall;; *) NCHOICE=local;; esac
 fi
 DASH_PORT="$(randport)"
 if [ "$NCHOICE" = firewall ]; then
@@ -165,12 +161,16 @@ if [ "$NCHOICE" = firewall ]; then
   ufw allow OpenSSH >/dev/null 2>&1 || true; [ -n "$MYIP" ] && ufw allow from "$MYIP" to any port "$DASH_PORT" proto tcp >/dev/null 2>&1; ufw --force enable >/dev/null 2>&1 || true
   HOST_FOR_URL="$(curl -fsS4 https://ifconfig.me 2>/dev/null || echo YOUR_SERVER_IP)"
   ok "firewall: port $DASH_PORT open to ${MYIP:-<set this>} only"
-else
+elif [ "$NCHOICE" = tailscale ]; then
   have tailscale || { warn "installing Tailscale"; curl -fsSL https://tailscale.com/install.sh | sh >/dev/null 2>&1 || warn "install tailscale manually"; }
   ufw default deny incoming >/dev/null 2>&1 || true; ufw allow OpenSSH >/dev/null 2>&1 || true; ufw --force enable >/dev/null 2>&1 || true
   tailscale up >/dev/null 2>&1 || warn "run 'tailscale up' to authorise this box"
   HOST_FOR_URL="$(tailscale ip -4 2>/dev/null | head -1 || echo YOUR_TAILSCALE_IP)"
   ok "Tailscale-only; no public ports opened"
+else
+  # local: dashboard already binds 127.0.0.1; reach it over an SSH tunnel if remote.
+  HOST_FOR_URL="localhost"
+  ok "local only - dashboard on 127.0.0.1:$DASH_PORT (SSH-tunnel in if this box is remote)"
 fi
 
 # ----- 7. secrets (outside web root) -----
@@ -219,17 +219,7 @@ chown root:"$SVC_USER" "$DL_SECRETS_DIR/dashboard.env"; chmod 640 "$DL_SECRETS_D
 printf '{"%s":true,"updatedAt":"%s"}\n' "$PROVIDER" "$(date -u +%FT%TZ)" > "$DL_DATA/providers.json"
 ok "secrets split: provider keys in secrets.env (runner only), web vars in dashboard.env"
 
-# ----- 8. first routine (from the wizard's schedule) -----
-if [ -n "${DL_CRON:-}" ] && [ ! -s "$DL_DATA/routines.json" ]; then
-  jq -n --arg p "$PROVIDER" --arg m "$MODEL" --arg c "$DL_CRON" '
-    {routines:[{id:"starter",name:"My first routine",
-      instructions:"Describe what this agent should do each run. Edit me in the dashboard.",
-      provider:$p,model:$m,repo:"",connectors:[],behavior:"",permissions:"",paused:false,
-      trigger:{type:"schedule",cron:$c},
-      contract:{timeoutMinutes:20,maxConsecutiveFailures:2,maxRunsPerDay:96}}]}' \
-    > "$DL_DATA/routines.json"
-  ok "seeded a first routine on schedule: $DL_CRON"
-fi
+# (No agents are created at install. The customer adds them in the dashboard.)
 
 # ----- 9. permissions -----
 cat > /etc/sudoers.d/dreamlabs <<EOF
@@ -302,18 +292,15 @@ esac
 EOF
 chmod +x /usr/local/bin/dreamlabs
 
-# ----- 12. test fire + finish -----
-if [ -s "$DL_DATA/routines.json" ] && [ "$(jq '.routines|length' "$DL_DATA/routines.json" 2>/dev/null||echo 0)" -gt 0 ]; then
-  say "Test fire"; FIRST="$(jq -r '.routines[0].id' "$DL_DATA/routines.json")"
-  sudo -u "$SVC_USER" "$DL_APP/bin/run-agent.sh" "$FIRST" manual >/dev/null 2>&1 && ok "ran '$FIRST'" || warn "test run nonzero - check the dashboard"
-fi
-
+# ----- 12. finish -----
 LINK="$DASH_URL/?token=$DASH_TOKEN"
 say "Done - v$(cat "$DL_APP/VERSION" 2>/dev/null)"
-echo "  ┌────────────────────────────────────────────────────────────"
-echo "  │  Your dashboard (this link is your password - keep it private):"
-echo "  │    $LINK"
-echo "  │  Anytime:  dreamlabs link · logs · update · restart"
-echo "  └────────────────────────────────────────────────────────────"
+echo "  +-----------------------------------------------------------"
+echo "  |  Your dashboard (this link is your password - keep it private):"
+echo "  |    $LINK"
+echo "  |  Now create agents in the dashboard: add a repo, a schedule, connectors."
+echo "  |  Anytime:  dreamlabs link | logs | update | restart"
+echo "  +-----------------------------------------------------------"
 [ "$NCHOICE" = tailscale ] && echo "  (Reachable once 'tailscale up' is authorised and your device is on the tailnet.)"
-[ "$AUTH" = oauth ] && [ "$PROVIDER" != claude ] && warn "Finish OAuth if you haven't: sudo -u $AGENT_USER ${PROVIDER/gemini/gemini  }… (see above)"
+[ "$NCHOICE" = local ] && echo "  (Remote box? Reach it with:  ssh -L $DASH_PORT:localhost:$DASH_PORT user@host )"
+[ "$AUTH" = oauth ] && [ "$PROVIDER" != claude ] && warn "Finish OAuth if you skipped it: sudo -u $AGENT_USER $PROVIDER login  (see above)"

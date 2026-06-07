@@ -89,36 +89,17 @@ select:focus,input.txt:focus{outline:0;border-color:var(--accent);box-shadow:0 0
     <select id="model"></select>
   </div>
 
-  <!-- 4. repo -->
+  <!-- 4. access -->
   <div class="step">
-    <div class="steplab"><span class="n">4</span> Your agent repo <span class="opt">· optional</span></div>
-    <input class="txt" id="repo" placeholder="https://github.com/you/your-agent-repo (blank = starter template)">
-    <div class="hint">Cloned into the agent workspace. Holds your SOUL / instructions and any code the agent works on.</div>
-  </div>
-
-  <!-- 5. access -->
-  <div class="step">
-    <div class="steplab"><span class="n">5</span> How will you reach the dashboard?</div>
+    <div class="steplab"><span class="n">4</span> How will you reach the dashboard?</div>
     <div class="seg">
-      <label><input type="radio" name="access" value="tailscale" checked><span class="opt">Tailscale only<span class="s">Private, zero open ports. Recommended.</span></span></label>
+      <label><input type="radio" name="access" value="local" checked><span class="opt">Local only<span class="s">This machine, localhost. No firewall. Lowest risk.</span></span></label>
+      <label><input type="radio" name="access" value="tailscale"><span class="opt">Tailscale<span class="s">Reach it privately from other devices.</span></span></label>
       <label><input type="radio" name="access" value="firewall"><span class="opt">Firewall to my IP<span class="s">Open the port to one address.</span></span></label>
     </div>
   </div>
 
-  <!-- 6. schedule -->
-  <div class="step">
-    <div class="steplab"><span class="n">6</span> First schedule <span class="opt">· optional</span></div>
-    <select id="cron">
-      <option value="">No schedule (set it up in the dashboard)</option>
-      <option value="*/15 * * * *">Every 15 minutes</option>
-      <option value="0 * * * *">Hourly</option>
-      <option value="0 9 * * *">Daily at 9am</option>
-      <option value="0 9 * * 1-5">Weekday mornings (9am)</option>
-    </select>
-    <div class="hint">Sub-hourly is the whole point of self-hosting - cloud routines can't go below 1 hour.</div>
-  </div>
-
-  <div class="warn">⚠️ <div>This command contains <b>no secrets</b> - only your choices. You'll paste your API key or do the OAuth step on your own server during install.</div></div>
+  <div class="warn">⚠️ <div>This installs the <b>dashboard</b> only. You create agents from there, each with its own repo, schedule, and connectors. The command contains <b>no secrets</b>; you paste your key or sign in on your own machine during install.</div></div>
 
   <!-- generated command -->
   <div class="cmdwrap">
@@ -153,7 +134,7 @@ const PROVIDERS = [
     auth:['key'], models:[''], keyName:'API key', base:'' },
 ];
 
-let state = { provider:'claude', auth:'oauth', model:'', repo:'', access:'tailscale', cron:'' };
+let state = { provider:'claude', auth:'oauth', model:'', access:'local' };
 
 function provById(id){ return PROVIDERS.find(p=>p.id===id); }
 
@@ -193,18 +174,17 @@ function buildCmd(){
   env.push(['DL_PROVIDER', p.id]);                       // claude|codex|grok|gemini|deepseek|api
   env.push(['DL_AUTH', p.auth.includes(state.auth)?state.auth:'key']);
   if(state.model) env.push(['DL_MODEL', state.model]);
-  if(state.repo.trim()) env.push(['DL_REPO', state.repo.trim()]);
   env.push(['DL_ACCESS', state.access]);
-  if(state.cron) env.push(['DL_CRON', state.cron]);
   const envStr = env.map(([k,v])=>`<span class="k">${k}</span>=<span class="v">${v}</span>`).join(' \\\n  ');
   return `curl -fsSL https://get.joindreamlabs.com/install.sh | \\\n  ${envStr} \\\n  bash`;
 }
 function renderNext(){
   const p = provById(state.provider);
+  const host = state.access==='local' ? 'your machine (or a box you SSH into)' : 'a fresh Ubuntu box';
   const steps = [];
-  steps.push('SSH into a fresh Ubuntu box');
-  steps.push(state.auth==='oauth' ? `authorise <b>${p.name}</b>` : `paste your <b>${p.keyName}</b>`);
-  steps.push('open your private dashboard link');
+  steps.push(`run it on ${host}`);
+  steps.push(state.auth==='oauth' ? `sign in to <b>${p.name}</b>` : `paste your <b>${p.keyName}</b>`);
+  steps.push('open the dashboard, create your first agent');
   document.getElementById('next').innerHTML = 'Next: ' + steps.map((s,i)=>`<b>${i+1}.</b> ${s}`).join(' &nbsp; ');
 }
 function render(){ renderProviders(); renderAuth(); renderModels(); document.getElementById('cmd').innerHTML = buildCmd(); renderNext(); }
@@ -213,9 +193,7 @@ function copyCmd(btn){
   const txt = document.getElementById('cmd').innerText;
   navigator.clipboard.writeText(txt).then(()=>{ const o=btn.textContent; btn.textContent='Copied ✓'; setTimeout(()=>btn.textContent=o,1500); });
 }
-document.getElementById('repo').addEventListener('input', e=>{ state.repo=e.target.value; document.getElementById('cmd').innerHTML=buildCmd(); });
 document.getElementById('model').addEventListener('change', e=>{ state.model=e.target.value; document.getElementById('cmd').innerHTML=buildCmd(); });
-document.getElementById('cron').addEventListener('change', e=>{ state.cron=e.target.value; document.getElementById('cmd').innerHTML=buildCmd(); });
 document.querySelectorAll('input[name=access]').forEach(r=>r.addEventListener('change', e=>{ state.access=e.target.value; document.getElementById('cmd').innerHTML=buildCmd(); }));
 render();
 </script>

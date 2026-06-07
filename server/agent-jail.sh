@@ -28,13 +28,15 @@ INSTR="$(cat "$INSTRFILE")"
 [ -n "$INSTR" ] || { echo "empty instructions" >&2; exit 2; }
 
 # Base allowlist. `env -i` later wipes everything else from the caller's env.
+# Keep the caller's PATH (the runner sets a known-good one incl. node/homebrew on
+# macOS) plus the standard dirs, so the provider CLI resolves under env -i.
 ENVV=(
-  "PATH=/usr/local/bin:/usr/bin:/bin"
+  "PATH=${PATH:+$PATH:}/usr/local/bin:/usr/bin:/bin"
   "HOME=$AGENT_HOME"
   "TERM=dumb"
   "LANG=C.UTF-8"
 )
-add(){ [ -n "${2:-}" ] && ENVV+=("$1=$2"); }
+add(){ if [ -n "${2:-}" ]; then ENVV+=("$1=$2"); fi; }   # must return 0 (set -e)
 
 case "$PROV" in
   claude)
@@ -75,5 +77,13 @@ case "$PROV" in
 esac
 
 cd "$WS"
-# sudo -n: never prompt. env -i: hard reset, then apply only the allowlist.
-exec sudo -n -u "$AGENT_USER" env -i "${ENVV[@]}" "${CMD[@]}"
+# env -i: hard reset of the environment, then apply ONLY the allowlist, so the
+# agent never inherits the server's other secrets.
+# Linux: also drop to the unprivileged agent user (sudo -n, never prompts).
+# Local/macOS (DL_NO_SUDO=1): single-user box, run as the same user - the env
+# allowlist is still enforced; file-level isolation is relaxed (see AUDIT.md L1).
+if [ "${DL_NO_SUDO:-0}" = "1" ]; then
+  exec env -i "${ENVV[@]}" "${CMD[@]}"
+else
+  exec sudo -n -u "$AGENT_USER" env -i "${ENVV[@]}" "${CMD[@]}"
+fi

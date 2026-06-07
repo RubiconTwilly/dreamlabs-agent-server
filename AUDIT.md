@@ -65,6 +65,26 @@ in dlws, is not the owner so cannot read it).
   rename. A simultaneous edit could lose one update (no corruption - rename is
   atomic). Low probability; acceptable for v0.1.
 
+## Bugs caught by live macOS testing (v0.2.0)
+Running the real installer on macOS+localhost surfaced four bugs that unit-level
+parsing missed - all fixed:
+- **B1 (critical) - jailed agent never ran.** The `add()` env-allowlist helper
+  ended in a `&&` test that returns non-zero when a key is empty; under
+  `set -e` that aborted `agent-jail.sh` before `exec`. This broke EVERY real run
+  on Linux too. Fixed: `add()` now uses `if` and returns 0. Verified with a mock
+  provider returning a real completion (rc=0, output logged).
+- **B2 - runner sourced secrets but did not export them**, so the agent received
+  empty credentials. Fixed with `set -a` around the source.
+- **B3 - launchd/cron minimal PATH** excluded Homebrew, so `node`/CLIs weren't
+  found. Fixed: an explicit PATH is baked into secrets.env/dashboard.env and the
+  jail forwards it under `env -i`.
+- **B4 - secrets path** defaulted to the Linux location. Fixed: the runner
+  auto-detects `~/.dreamlabs/secrets.env` (macOS) vs `/etc/dreamlabs` (Linux).
+
+End-to-end verified on macOS: install -> launchd dashboard on localhost ->
+create routine -> run (real completion via mock) -> failure logging ->
+2-strike auto-pause -> paused run blocked.
+
 ## Self-update safety
 The dashboard can only *request* an update (drops `.update-requested`). A root
 systemd path-unit triggers `update-self.sh`, which pulls ONLY from the pinned

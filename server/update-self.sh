@@ -58,6 +58,15 @@ install -m 0755 "$TMP/update-self.sh" "$DL_APP/bin/update-self.sh"
 install -m 0644 "$TMP/VERSION" "$DL_APP/VERSION"
 log "installed version $NEWVER, restarting dashboard"
 
-systemctl restart dreamlabs-dashboard || { status "error" "Updated files but dashboard restart failed - check: journalctl -u dreamlabs-dashboard" "$NEWVER"; exit 1; }
+# Restart the dashboard, OS-aware: systemd on Linux, launchd on macOS.
+restarted=0
+if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files dreamlabs-dashboard.service >/dev/null 2>&1; then
+  systemctl restart dreamlabs-dashboard && restarted=1
+elif command -v launchctl >/dev/null 2>&1; then
+  launchctl kickstart -k "gui/$(id -u)/com.dreamlabs.dashboard" >/dev/null 2>&1 && restarted=1
+fi
+if [ "$restarted" -ne 1 ]; then
+  status "error" "Updated files but could not restart the dashboard automatically. Restart it manually." "$NEWVER"; exit 1
+fi
 status "done" "Updated to $NEWVER." "$NEWVER"
 log "update complete: $NEWVER"
