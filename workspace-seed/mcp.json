@@ -1,0 +1,16 @@
+{
+  "_comment": "Connectors the agent can use each run. Enable in the dashboard, wire here. Secrets come from /etc/dreamlabs/secrets.env (env interpolation), never inline.",
+  "mcpServers": {
+    "_example_gmail": {
+      "_disabled": true,
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-gmail"]
+    },
+    "_example_github": {
+      "_disabled": true,
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_TOKEN": "${GITHUB_TOKEN}" }
+    }
+  }
+}

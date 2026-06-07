@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Set up your Agent Server · Dream Labs</title>
+<style>
+:root{
+  --canvas:#1c1b19; --surface-1:#232220; --surface-2:#2b2926; --surface-3:#34322e;
+  --field:#2b2926; --border:rgba(255,255,255,.07); --border-strong:rgba(255,255,255,.14);
+  --ink:#f5f4f2; --muted:#c6c2bb; --subtle:#928d84; --tertiary:#6c675f;
+  --accent:#c96442; --accent-soft:rgba(201,100,66,.16); --white:#fafaf8; --green:#5cbb6e;
+  --warn-bg:rgba(224,169,72,.10); --warn-border:rgba(224,169,72,.28); --warn-ink:#e6b863;
+  --r-md:10px; --r-lg:14px; --r-xl:18px;
+  --font:"SF Pro Text",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--canvas);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+a{color:var(--accent)}
+code{font-family:var(--mono);font-size:.86em;background:rgba(255,255,255,.06);padding:1px 5px;border-radius:5px;color:var(--muted)}
+.wrap{max-width:760px;margin:0 auto;padding:40px 24px 120px}
+.brand{display:flex;align-items:center;gap:9px;font-weight:600;font-size:15px;margin-bottom:30px}
+.brand .bolt{color:var(--accent);font-size:18px}
+h1{font-size:27px;font-weight:600;letter-spacing:-.025em;margin:0 0 6px}
+.lede{color:var(--subtle);font-size:14px;margin:0 0 8px}
+.step{margin:34px 0}
+.steplab{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:600;color:var(--ink);margin-bottom:14px}
+.steplab .n{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--surface-3);color:var(--muted);font-size:12px}
+.steplab .opt{color:var(--tertiary);font-weight:450;font-size:11.5px}
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.card{display:flex;gap:13px;align-items:flex-start;padding:15px 16px;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface-1);cursor:pointer;transition:all .12s ease}
+.card:hover{background:var(--surface-2);border-color:var(--border-strong)}
+.card.on{border-color:var(--accent);background:var(--accent-soft)}
+.card .ic{font-size:22px;line-height:1;width:26px;text-align:center}
+.card .t{font-weight:560;font-size:14px}
+.card .s{font-size:12px;color:var(--subtle);margin-top:3px}
+.card .badges{margin-top:7px;display:flex;gap:5px;flex-wrap:wrap}
+.badge{font-size:10px;font-weight:540;padding:2px 7px;border-radius:6px;background:var(--surface-3);color:var(--subtle);border:1px solid var(--border)}
+.badge.oauth{color:var(--green);border-color:rgba(92,187,110,.3)}
+.card input{display:none}
+.seg{display:flex;gap:8px}
+.seg label{flex:1}
+.seg .opt{display:block;text-align:center;padding:11px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface-1);cursor:pointer;font-size:13px;color:var(--muted);transition:all .12s}
+.seg input{display:none}
+.seg input:checked+.opt{border-color:var(--accent);background:var(--accent-soft);color:var(--ink);font-weight:540}
+.seg .opt .s{display:block;font-size:11px;color:var(--tertiary);margin-top:3px;font-weight:450}
+select,input.txt{background:var(--field);border:1px solid var(--border);border-radius:var(--r-md);color:var(--ink);font-family:inherit;font-size:14px;padding:11px 13px;width:100%}
+select:focus,input.txt:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.hint{font-size:11.5px;color:var(--tertiary);margin-top:7px}
+.warn{background:var(--warn-bg);border:1px solid var(--warn-border);border-radius:var(--r-md);padding:12px 14px;color:var(--warn-ink);font-size:12.5px;display:flex;gap:9px;margin-top:14px}
+.cmdwrap{position:sticky;bottom:0;margin-top:40px}
+.cmd{background:#141311;border:1px solid var(--border-strong);border-radius:var(--r-lg);padding:18px 18px 16px;font-family:var(--mono);font-size:12.5px;line-height:1.7;color:var(--ink);white-space:pre-wrap;word-break:break-all}
+.cmd .v{color:var(--accent)}
+.cmd .k{color:var(--subtle)}
+.cmdbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px}
+.btn{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 18px;border-radius:var(--r-md);background:var(--white);color:#1c1b19;font-weight:600;font-size:13px;border:0;cursor:pointer;font-family:inherit;transition:filter .12s}
+.btn:hover{filter:brightness(.93)}
+.next{font-size:12px;color:var(--subtle)}
+.next b{color:var(--muted);font-weight:540}
+.muted{color:var(--subtle)}
+@media(max-width:620px){.cards{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><span class="bolt">⚡</span> Dream Labs Agent Server</div>
+  <h1>Set up your agent server</h1>
+  <p class="lede">Pick your stack. We'll generate one command you paste into a fresh Ubuntu box. Your keys are entered on your own server during install — never here.</p>
+
+  <!-- 1. provider -->
+  <div class="step">
+    <div class="steplab"><span class="n">1</span> Choose your AI</div>
+    <div class="cards" id="providers"></div>
+  </div>
+
+  <!-- 2. auth -->
+  <div class="step" id="authStep">
+    <div class="steplab"><span class="n">2</span> How will you sign in?</div>
+    <div class="seg" id="authSeg"></div>
+    <div class="hint" id="authHint"></div>
+  </div>
+
+  <!-- 3. model -->
+  <div class="step">
+    <div class="steplab"><span class="n">3</span> Default model <span class="opt">· can change per routine later</span></div>
+    <select id="model"></select>
+  </div>
+
+  <!-- 4. repo -->
+  <div class="step">
+    <div class="steplab"><span class="n">4</span> Your agent repo <span class="opt">· optional</span></div>
+    <input class="txt" id="repo" placeholder="https://github.com/you/your-agent-repo (blank = starter template)">
+    <div class="hint">Cloned into the agent workspace. Holds your SOUL / instructions and any code the agent works on.</div>
+  </div>
+
+  <!-- 5. access -->
+  <div class="step">
+    <div class="steplab"><span class="n">5</span> How will you reach the dashboard?</div>
+    <div class="seg">
+      <label><input type="radio" name="access" value="tailscale" checked><span class="opt">Tailscale only<span class="s">Private, zero open ports. Recommended.</span></span></label>
+      <label><input type="radio" name="access" value="firewall"><span class="opt">Firewall to my IP<span class="s">Open the port to one address.</span></span></label>
+    </div>
+  </div>
+
+  <!-- 6. schedule -->
+  <div class="step">
+    <div class="steplab"><span class="n">6</span> First schedule <span class="opt">· optional</span></div>
+    <select id="cron">
+      <option value="">No schedule (set it up in the dashboard)</option>
+      <option value="*/15 * * * *">Every 15 minutes</option>
+      <option value="0 * * * *">Hourly</option>
+      <option value="0 9 * * *">Daily at 9am</option>
+      <option value="0 9 * * 1-5">Weekday mornings (9am)</option>
+    </select>
+    <div class="hint">Sub-hourly is the whole point of self-hosting — cloud routines can't go below 1 hour.</div>
+  </div>
+
+  <div class="warn">⚠️ <div>This command contains <b>no secrets</b> — only your choices. You'll paste your API key or do the OAuth step on your own server during install.</div></div>
+
+  <!-- generated command -->
+  <div class="cmdwrap">
+    <div class="cmd" id="cmd"></div>
+    <div class="cmdbar">
+      <span class="next" id="next"></span>
+      <button class="btn" onclick="copyCmd(this)">Copy install command</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Provider matrix — model IDs + auth current as of June 2026 (see AUDIT.md).
+// type 'cli' = native agent CLI; type 'api' = generic OpenAI-compatible runner.
+const PROVIDERS = [
+  { id:'claude', icon:'◆', name:'Claude Code', tag:'Anthropic — closest to the routines feel', type:'cli',
+    auth:['oauth','key'], models:['claude-opus-4-8','claude-sonnet-4-6','claude-haiku-4-5'],
+    oauthCmd:'claude setup-token', keyName:'ANTHROPIC_API_KEY' },
+  { id:'codex', icon:'⬡', name:'OpenAI Codex', tag:'GPT / Codex via the Codex CLI', type:'cli',
+    auth:['oauth','key'], models:['gpt-5.3-codex','gpt-5.4-mini'],
+    oauthCmd:'codex login --device-auth', keyName:'OPENAI_API_KEY' },
+  { id:'grok', icon:'✦', name:'xAI Grok', tag:'Grok 4.3 — official Grok Build CLI', type:'cli',
+    auth:['oauth','key'], models:['grok-4.3'],
+    oauthCmd:'grok auth login', keyName:'XAI_API_KEY' },
+  { id:'gemini', icon:'✧', name:'Google Gemini', tag:'Gemini CLI — Google sign-in', type:'cli',
+    auth:['oauth','key'], models:['gemini-3.5-flash','gemini-3.1-pro-preview'],
+    oauthCmd:'gemini → Sign in with Google', keyName:'GEMINI_API_KEY' },
+  { id:'deepseek', icon:'⬢', name:'DeepSeek', tag:'Cheap, capable — API key', type:'api',
+    auth:['key'], models:['deepseek-v4-flash','deepseek-v4-pro'],
+    keyName:'DeepSeek API key', base:'https://api.deepseek.com' },
+  { id:'api', icon:'⚙', name:'Any API', tag:'Any OpenAI-compatible endpoint', type:'api',
+    auth:['key'], models:[''], keyName:'API key', base:'' },
+];
+
+let state = { provider:'claude', auth:'oauth', model:'', repo:'', access:'tailscale', cron:'' };
+
+function provById(id){ return PROVIDERS.find(p=>p.id===id); }
+
+function renderProviders(){
+  document.getElementById('providers').innerHTML = PROVIDERS.map(p=>`
+    <label class="card ${state.provider===p.id?'on':''}" onclick="pickProvider('${p.id}')">
+      <span class="ic">${p.icon}</span>
+      <div><div class="t">${p.name}</div><div class="s">${p.tag}</div>
+        <div class="badges">${p.auth.map(a=>`<span class="badge ${a==='oauth'?'oauth':''}">${a==='oauth'?'OAuth / subscription':'API key'}</span>`).join('')}</div>
+      </div>
+    </label>`).join('');
+}
+function renderAuth(){
+  const p = provById(state.provider);
+  if(!p.auth.includes(state.auth)) state.auth = p.auth[0];
+  const lab = { oauth:'OAuth / subscription', key:'API key' };
+  const sub = { oauth:'Use your existing plan. No per-token billing.', key:'Pay-per-token. Paste it during install.' };
+  document.getElementById('authSeg').innerHTML = p.auth.map(a=>`
+    <label><input type="radio" name="auth" value="${a}" ${state.auth===a?'checked':''} onchange="state.auth='${a}';render()">
+      <span class="opt">${lab[a]}<span class="s">${sub[a]}</span></span></label>`).join('');
+  document.getElementById('authStep').style.display = p.auth.length>1 ? 'block' : 'none';
+  const h = state.auth==='oauth'
+    ? `During install you'll run <code>${p.oauthCmd||'the login step'}</code> once on your server to authorise.`
+    : `During install you'll paste your <code>${p.keyName}</code>. It's stored in a root-only file the web app can't read.`;
+  document.getElementById('authHint').innerHTML = h;
+}
+function renderModels(){
+  const p = provById(state.provider);
+  const tiers = ['premium','balanced','cheap','extra'];
+  document.getElementById('model').innerHTML = p.models.map((m,i)=>
+    `<option value="${m}">${m||'Provider default'}${m&&p.models.length>1?'  ·  '+(tiers[i]||''):''}</option>`).join('');
+  state.model = p.models[0]||'';
+}
+function buildCmd(){
+  const p = provById(state.provider);
+  const env = [];
+  env.push(['DL_PROVIDER', p.id]);                       // claude|codex|grok|gemini|deepseek|api
+  env.push(['DL_AUTH', p.auth.includes(state.auth)?state.auth:'key']);
+  if(state.model) env.push(['DL_MODEL', state.model]);
+  if(state.repo.trim()) env.push(['DL_REPO', state.repo.trim()]);
+  env.push(['DL_ACCESS', state.access]);
+  if(state.cron) env.push(['DL_CRON', state.cron]);
+  const envStr = env.map(([k,v])=>`<span class="k">${k}</span>=<span class="v">${v}</span>`).join(' \\\n  ');
+  return `curl -fsSL https://get.joindreamlabs.com/install.sh | \\\n  ${envStr} \\\n  bash`;
+}
+function renderNext(){
+  const p = provById(state.provider);
+  const steps = [];
+  steps.push('SSH into a fresh Ubuntu box');
+  steps.push(state.auth==='oauth' ? `authorise <b>${p.name}</b>` : `paste your <b>${p.keyName}</b>`);
+  steps.push('open your private dashboard link');
+  document.getElementById('next').innerHTML = 'Next: ' + steps.map((s,i)=>`<b>${i+1}.</b> ${s}`).join(' &nbsp; ');
+}
+function render(){ renderProviders(); renderAuth(); renderModels(); document.getElementById('cmd').innerHTML = buildCmd(); renderNext(); }
+function pickProvider(id){ state.provider=id; const p=provById(id); state.auth=p.auth[0]; render(); }
+function copyCmd(btn){
+  const txt = document.getElementById('cmd').innerText;
+  navigator.clipboard.writeText(txt).then(()=>{ const o=btn.textContent; btn.textContent='Copied ✓'; setTimeout(()=>btn.textContent=o,1500); });
+}
+document.getElementById('repo').addEventListener('input', e=>{ state.repo=e.target.value; document.getElementById('cmd').innerHTML=buildCmd(); });
+document.getElementById('model').addEventListener('change', e=>{ state.model=e.target.value; document.getElementById('cmd').innerHTML=buildCmd(); });
+document.getElementById('cron').addEventListener('change', e=>{ state.cron=e.target.value; document.getElementById('cmd').innerHTML=buildCmd(); });
+document.querySelectorAll('input[name=access]').forEach(r=>r.addEventListener('change', e=>{ state.access=e.target.value; document.getElementById('cmd').innerHTML=buildCmd(); }));
+render();
+</script>
+</body>
+</html>

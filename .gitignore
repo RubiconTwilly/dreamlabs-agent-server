@@ -1,0 +1,10 @@
+# local runtime / preview artifacts
+*.tmp
+*.log
+.DS_Store
+node_modules/
+# never commit secrets or local state
+secrets.env
+dashboard.env
+*.local
+/data/
