@@ -12,10 +12,11 @@
 // Visual language matches the Claude routines UI: warm flat-dark, white primary
 // buttons, docked pickers, big trigger rows, connector chips, amber callouts.
 import http from 'node:http';
-import { readFileSync, writeFileSync, existsSync, readdirSync, renameSync, mkdirSync, openSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, renameSync, mkdirSync, openSync, unlinkSync } from 'node:fs';
 import { spawn, execFileSync } from 'node:child_process';
 import { timingSafeEqual, createHmac, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 // Account-level connectors (BYO OAuth apps). Logic + UI live in their own files
 // so this dashboard stays small and doesn't collide with concurrent design edits.
 import { CONNECTORS, byId as connById } from './connectors/registry.mjs';
@@ -304,10 +305,15 @@ function appendRun(obj) {
   try { writeFileSync(RUNS_FILE, JSON.stringify(obj) + '\n', { flag: 'a' }); } catch (e) { console.error('appendRun:', e.message); }
 }
 
-// Rewrite OUR crontab (the dreamlabs user's own) from routines.json.
+// Install the routine schedules from routines.json into the OS scheduler.
+// Linux: the dreamlabs user's crontab. macOS: per-routine launchd LaunchAgents.
+// (On macOS the user crontab is gated by Full Disk Access under launchd, so a
+// launchd-spawned process can neither install a crontab nor have cron read one;
+// launchd agents fire with no FDA, exactly like this dashboard's own daemon.)
 // DL_NO_CRON=1 disables this entirely (local preview / externally-managed cron).
 function syncCron(obj) {
   if (process.env.DL_NO_CRON) return;
+  if (process.platform === 'darwin') return syncLaunchd(obj);
   let current = '';
   try { current = execFileSync('crontab', ['-l'], { encoding: 'utf8' }); } catch { current = ''; }
   const begin = `# BEGIN ${CRON_TAG}`, end = `# END ${CRON_TAG}`;
@@ -322,6 +328,106 @@ function syncCron(obj) {
   const next = (cleaned.trim() ? cleaned.trim() + '\n' : '') + lines.join('\n') + '\n';
   try { execFileSync('crontab', ['-'], { input: next }); }
   catch (e) { console.error('cron sync failed:', e.message); }
+}
+
+// ---- macOS scheduler: per-routine launchd LaunchAgents (no Full Disk Access needed) ----
+const LAUNCHD_DIR = join(homedir(), 'Library', 'LaunchAgents');
+const ROUTINE_LABEL = (id) => `com.dreamlabs.routine.${id}`;
+
+// Translate a standard 5-field cron expr (m h dom mon dow) into launchd
+// StartCalendarInterval dicts. Wildcard fields are omitted (launchd treats an
+// absent key as "any"); constrained fields are enumerated and combined. Returns
+// null for anything it can't translate (e.g. month/weekday names) so the caller
+// skips that routine loudly instead of scheduling it wrong. NOTE: if BOTH
+// day-of-month and day-of-week are set, launchd ANDs them where cron ORs - a
+// rare combo; avoid setting both in one routine's cron.
+function cronToCalendarIntervals(expr) {
+  const parts = String(expr).trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const FIELD = [ ['Minute',0,59], ['Hour',0,23], ['Day',1,31], ['Month',1,12], ['Weekday',0,7] ];
+  const parseField = (f, min, max) => {
+    if (f === '*' || f === '*/1') return null;
+    const out = new Set();
+    for (const piece of f.split(',')) {
+      const m = piece.match(/^(\*|\d+(?:-\d+)?)(?:\/(\d+))?$/);
+      if (!m) return undefined;
+      let lo = min, hi = max;
+      if (m[1] !== '*') { const r = m[1].split('-'); lo = parseInt(r[0],10); hi = parseInt(r[1] ?? r[0],10); }
+      const step = m[2] ? parseInt(m[2],10) : 1;
+      for (let v = lo; v <= hi; v += step) { if (v >= min && v <= max) out.add(v); }
+    }
+    return [...out].sort((a,b)=>a-b);
+  };
+  const sets = FIELD.map(([,mn,mx],i) => parseField(parts[i], mn, mx));
+  if (sets.some(s => s === undefined)) return null;
+  let dicts = [{}];
+  FIELD.forEach(([key], i) => {
+    const vals = sets[i];
+    if (vals === null) return;
+    const next = [];
+    for (const d of dicts) for (const v of vals) next.push({ ...d, [key]: v });
+    dicts = next;
+  });
+  if (dicts.length === 1 && Object.keys(dicts[0]).length === 0) {
+    dicts = Array.from({ length: 60 }, (_, m) => ({ Minute: m }));
+  }
+  return dicts;
+}
+
+function routinePlistXML(id, dicts) {
+  const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const intervals = dicts.map(d =>
+    '    <dict>' + Object.entries(d).map(([k,v]) => `<key>${k}</key><integer>${v}</integer>`).join('') + '</dict>'
+  ).join('\n');
+  const path = process.env.PATH || '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>${ROUTINE_LABEL(id)}</string>
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>${esc(RUNNER)}</string><string>${esc(id)}</string><string>cron</string></array>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>${esc(path)}</string><key>DL_DATA</key><string>${esc(DATA)}</string><key>DL_APP</key><string>${esc(APP)}</string></dict>
+  <key>StartCalendarInterval</key><array>
+${intervals}
+  </array>
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string>${esc(join(DATA, 'launchd-routine.out.log'))}</string>
+  <key>StandardErrorPath</key><string>${esc(join(DATA, 'launchd-routine.err.log'))}</string>
+</dict></plist>
+`;
+}
+
+// Reconcile ~/Library/LaunchAgents with the current routines: write+load the
+// scheduled, unpaused ones; bootout+remove any of ours that are no longer wanted.
+function syncLaunchd(obj) {
+  let uid = null; try { uid = process.getuid(); } catch {}
+  const domain = uid != null ? `gui/${uid}` : null;
+  try { mkdirSync(LAUNCHD_DIR, { recursive: true }); } catch {}
+  const wanted = new Map();
+  for (const r of obj.routines) {
+    if (r.trigger?.type === 'schedule' && r.trigger.cron && !r.paused && validId(r.id)) {
+      const dicts = cronToCalendarIntervals(r.trigger.cron);
+      if (dicts && dicts.length) wanted.set(r.id, dicts);
+      else console.error(`launchd sync: cannot translate cron "${r.trigger.cron}" for routine ${r.id} - not scheduled`);
+    }
+  }
+  let existing = [];
+  try { existing = readdirSync(LAUNCHD_DIR).filter(f => /^com\.dreamlabs\.routine\..+\.plist$/.test(f)); } catch {}
+  for (const f of existing) {
+    const id = f.replace(/^com\.dreamlabs\.routine\./, '').replace(/\.plist$/, '');
+    if (wanted.has(id)) continue;
+    if (domain) { try { execFileSync('launchctl', ['bootout', `${domain}/${ROUTINE_LABEL(id)}`], { stdio: 'ignore' }); } catch {} }
+    try { unlinkSync(join(LAUNCHD_DIR, f)); } catch {}
+  }
+  for (const [id, dicts] of wanted) {
+    const p = join(LAUNCHD_DIR, `${ROUTINE_LABEL(id)}.plist`);
+    try {
+      writeFileSync(p, routinePlistXML(id, dicts));
+      if (domain) {
+        try { execFileSync('launchctl', ['bootout', `${domain}/${ROUTINE_LABEL(id)}`], { stdio: 'ignore' }); } catch {}
+        execFileSync('launchctl', ['bootstrap', domain, p], { stdio: 'ignore' });
+      }
+    } catch (e) { console.error(`launchd sync failed for ${id}:`, e.message); }
+  }
 }
 function stripBlock(text, begin, end) {
   const lines = text.split('\n'); const out = []; let inside = false;

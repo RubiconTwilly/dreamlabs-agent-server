@@ -111,7 +111,9 @@ Customer box (Ubuntu VPS or macOS, localhost)
 ```
 
 - **Scheduler:** Linux = the service user's crontab (managed block, rewritten by
-  the dashboard). macOS = same crontab mechanism; launchd runs the dashboard.
+  the dashboard). macOS = per-routine launchd LaunchAgents (`com.dreamlabs.routine.*`),
+  because the user crontab is Full-Disk-Access-gated under launchd; the dashboard
+  translates each routine's cron to a launchd `StartCalendarInterval`. launchd also runs the dashboard.
 - **Per-routine repos:** each routine names its own repo (or none). The runner
   clones/pulls it into a per-routine workspace before the agent runs. The picker
   stores `owner/name`; the runner normalizes to a full URL.

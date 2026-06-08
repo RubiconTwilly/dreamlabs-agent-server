@@ -12,7 +12,7 @@
 #
 # Local model: binds 127.0.0.1, token auth, NO firewall/Tailscale needed. Runs as
 # a launchd LaunchAgent (starts at login, restarts on crash). Self-updates via a
-# launchd WatchPaths agent. Schedules use the user's crontab.
+# launchd WatchPaths agent. Schedules use per-routine launchd LaunchAgents.
 set -euo pipefail
 
 DL_APP="$HOME/.dreamlabs"
@@ -46,12 +46,18 @@ if [ "${1:-}" = "uninstall" ]; then
   launchctl bootout "$DOMAIN/$LABEL_UPD" 2>/dev/null || true
   launchctl bootout "$DOMAIN/com.dreamlabs.briefing" 2>/dev/null || true
   rm -f "$PLIST_DASH" "$PLIST_UPD" "$LA/com.dreamlabs.briefing.plist"
-  # remove our managed crontab block
+  # remove our per-routine launchd agents (macOS scheduler)
+  for p in "$LA"/com.dreamlabs.routine.*.plist; do
+    [ -e "$p" ] || continue
+    launchctl bootout "$DOMAIN/$(basename "$p" .plist)" 2>/dev/null || true
+    rm -f "$p"
+  done
+  # remove any legacy managed crontab block (pre-launchd installs)
   if crontab -l 2>/dev/null | grep -q 'dreamlabs-agent-server'; then
     crontab -l 2>/dev/null | awk '/# BEGIN dreamlabs-agent-server/{s=1} !s{print} /# END dreamlabs-agent-server/{s=0}' | crontab - || true
   fi
   rm -f /usr/local/bin/dreamlabs 2>/dev/null || sudo rm -f /usr/local/bin/dreamlabs 2>/dev/null || true
-  ok "services + crontab block + CLI removed"
+  ok "services + schedules + CLI removed"
   warn "Your data is kept at $DL_APP. Remove it with:  rm -rf $DL_APP"
   exit 0
 fi
