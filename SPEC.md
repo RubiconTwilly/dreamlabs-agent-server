@@ -1,7 +1,8 @@
 # Dream Labs Agent Server - Self-Hosted, Bring-Your-Own-AI Track
 
-**Status: LIVE, v0.11.0 (updated 2026-06-07).** Build + handoff doc - hand it to a dev to extend.
+**Status: LIVE, v0.12.1 (updated 2026-06-07).** Build + handoff doc - hand it to a dev to extend.
 
+- **NEW in v0.12.x - Personalization bridge (Dream Labs onboarding):** a paying member connects by the email they paid with and the box pulls THEIR quiz apps + recommended Dream agents + brand voice from `app.joindreamlabs.com`; Install builds a ready-to-run routine on the box. Consumer side built + **VERIFIED LIVE on a real account** (apps resolve, brand voice merges, install works, the panel is native to the dashboard). The ONE open piece is the BACKEND populating each agent's `apps` (the 49-agent tools -> connector-id mapping). See section 4.2.
 - **NEW in v0.11.0 - Connector directory (79 apps):** a manifest-driven "Connected apps" directory (`/connections`) styled like the Claude Code connectors (dark tiles, real brand logos, search, categories). Built from a connector-research workflow (23 grouped agents, official docs cited). One generic engine drives two auth styles: **bring-your-own OAuth app** (no Dream Labs-hosted apps, no verification chase - the customer makes their own app on their own server, we give clear baked tutorials) and **API key / token / bot token**. Connect an app once at the account level; any routine that ticks it gets ONLY a short-lived token/key injected at run time. Secrets live in 600 files the agent never sees. Apps: Slack, Stripe, HubSpot, Notion, Shopify, Xero, QuickBooks, Mailchimp, Klaviyo, Airtable, Calendly, Twilio, Dropbox, Salesforce, Microsoft 365, Meta (IG/FB/WhatsApp), and ~60 more. Google stays the curated reference (one OAuth app, scope catalog: Gmail/Calendar/Drive/Sheets/Docs/Analytics/YouTube). See section 4.1.
 - **Distribution (LIVE):** **https://get.joindreamlabs.com** - the setup wizard at `/`, the installer at `/install.sh`, and all server files, served by an Apache vhost on the EC2 box (`13.236.39.21`) with Let's Encrypt SSL. **Installs and self-updates pull from here, NOT GitHub.** Redeploy after code changes with `bash deploy.sh` (rsyncs the docroot; does not touch Apache).
 - **Install (one line):** `curl -fsSL https://get.joindreamlabs.com/install.sh | bash` (auto-detects macOS vs Linux; cloud VPS or local Mac/Linux). It auto-opens the dashboard at the end.
@@ -69,6 +70,7 @@ ownership upgrade. Do not gate the core experience behind a server.
 | Dashboard themes | DONE | Classic (warm-dark) + Dream Labs (navy) switcher in the header |
 | Audit | DONE | `AUDIT.md` (fixed F1, F2, B1-B4; known limits listed) |
 | Runtime verified end-to-end (2026-06-07, macOS) | DONE | Live-tested: cron is written by syncCron + the OS daemon FIRES it on schedule (server-local tz); loop contracts all enforce (overlap-skip, timeout-kill at the budget, auto-pause after N fails, daily-cap skip); run records + per-run logs + list/detail/calendar/briefing render; failure/auto-pause/cap alerts fire; connector token injected into the jailed agent with NO server-secret leak. Fixes from the audit: engine `isMain` made symlink-safe (injection would silently no-op under a symlinked path), run-timestamp parser fixed (history showed raw stamps), alerts now also route via the DL relay (members need no own bot), server timezone surfaced in the UI. Re-verify on Linux/systemd before GA. |
+| Personalization bridge (Dream Labs onboarding) | DONE (consumer); backend agent-apps PENDING | Connect-by-email pulls the member's quiz apps + Dream agents + brand voice; Install builds a routine. VERIFIED LIVE on a real account. `server/dl-backend.mjs` + a panel on the routines list. OPEN (backend): `/api/v1/agents/:id` returns empty `apps`, so installs arrive unwired - needs the 49-agent tools->connector mapping (Part A of the backend prompt). The dashboard auto-ticks once populated. See 4.2 |
 
 Queue (not yet built): more connectors (Microsoft 365 / Outlook, Square,
 ActiveCampaign - same pattern as Google, section 4.1); the DL backend relay
@@ -196,6 +198,42 @@ No engine/UI/route changes needed - it is all manifest-driven.
 
 ---
 
+## 4.2 Personalization bridge - Dream Labs onboarding (consumer DONE; backend agent-apps PENDING)
+
+A paying member connects their Dream Labs account by the email they paid with, and the
+box pulls THEIR world: the apps they ticked in the quiz, their recommended Dream agents,
+and their brand voice. Built and VERIFIED LIVE (2026-06-07) against the real backend on a
+real account.
+
+Files / wiring:
+- `server/dl-backend.mjs` - the client. Config in `data/dl.json` (600): {url, email, key,
+  onboarding, syncedAt}. Backend defaults to `https://app.joindreamlabs.com` (override
+  `DL_BACKEND_URL`). Connect-by-email GETs `/api/v1/onboarding?email=...`, which returns the
+  member's `key` + their world; Install GETs `/api/v1/agents/:id`.
+- Dashboard (surgical edits only): the onboarding panel renders on the routines list
+  (`dlOnboardingPanel`); routes `POST /dl/connect | /dl/sync | /dl/disconnect |
+  /dl/install/:id`. `dlBuildRoutine` turns a backend agent definition into a routine
+  (instructions with brand voice merged, connectors resolved from the agent's apps,
+  schedule, provider). With no account configured the dashboard stays the standalone product.
+- App-name -> connector-id resolution: an alias map (Gmail/Calendar/Drive/Sheets/Docs ->
+  google; Outlook -> outlook-mail; WhatsApp; etc.) plus a loose name match, so the member's
+  quiz-app names link to real connectors. The backend SHOULD return canonical connector ids;
+  this resolver is the robust fallback.
+
+Verified live (a real account): brand pulled, all 8 quiz apps resolved (zero dimmed), 4 Dream
+agents listed, Install created a routine with the brand voice merged (~7k-char instructions),
+and the panel matches the dashboard vibe.
+
+OPEN ITEM (backend - the Dream Labs dev's piece): `/api/v1/agents/:id` (and the onboarding
+agent entries) currently return EMPTY `apps`/`connectors`, so an installed agent arrives with
+NO integrations ticked (it has the brand voice + schedule, but nothing wired to act). Fix:
+populate each agent's `apps` with connector ids - the 49-agent `tools` -> connector-id mapping
+in Part A of `DREAMLABS-BACKEND-PROMPT.md`. Once populated, the dashboard auto-ticks them
+(proven against a mock); NO further dashboard changes needed. `provider` also returns empty
+(the box defaults to `claude`).
+
+---
+
 ## 5. File map (for the dev)
 
 ```
@@ -211,6 +249,7 @@ dreamlabs-agent-server/
 ├── server/
 │   ├── dashboard.mjs      THE dashboard (UI + all routes). Single file. (~1350 lines)
 │   ├── connections.mjs    "Connected apps" directory + per-connector page (manifest-driven)
+│   ├── dl-backend.mjs     Dream Labs onboarding bridge: connect-by-email, pull apps+agents+brand voice, Install -> routine
 │   ├── connectors/
 │   │   ├── engine.mjs            generic OAuth + API-key engine + runner CLI (`env <id>`)
 │   │   ├── registry.mjs          connector manifests (curated Google + GENERATED)
@@ -315,6 +354,11 @@ per-provider Connect buttons, clearer per-routine AI picker, **Google connector
 Claude-style directory with logos + tutorials (v0.11.0)**.
 
 Remaining:
+- **[ACTIVE NEXT - backend] Populate Dream agent `apps`** - `/api/v1/agents/:id` (and the
+  onboarding agent entries) return empty `apps`, so installed Dream agents arrive with no
+  integrations ticked. Map each of the 49 agents' `tools` -> connector ids (Part A of
+  `DREAMLABS-BACKEND-PROMPT.md`) and return them; the dashboard auto-ticks once populated.
+  This is the one thing between the onboarding bridge and fully-wired installs (section 4.2).
 0. **Verify the breakable connectors** (optional, recommended): the research was
    79/82 high-confidence with cited sources, but a targeted second workflow pass
    could adversarially re-check the 26 BYO-OAuth endpoints/scopes + the 3

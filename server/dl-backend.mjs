@@ -56,11 +56,26 @@ export async function dlFetchAgent(id) {
   return getJSON('/api/v1/agents/' + encodeURIComponent(id), c);
 }
 
+// Common quiz-app-name -> connector-id aliases (the Google/Microsoft suites share
+// one connector, and a few apps read differently in the quiz). The backend should
+// ideally return canonical ids; this keeps the panel robust meanwhile.
+const ALIAS = {
+  gmail: 'google', googlemail: 'google', email: 'google', googlecalendar: 'google', gcal: 'google',
+  googlesheets: 'google', googlesheet: 'google', sheets: 'google', googledocs: 'google', googledoc: 'google',
+  googledrive: 'google', drive: 'google', googleanalytics: 'google', ga4: 'google', youtube: 'google',
+  googlemaps: 'google-maps-places', googleplaces: 'google-maps-places', maps: 'google-maps-places',
+  googlebusinessprofile: 'google-business-profile', googlemybusiness: 'google-business-profile', gmb: 'google-business-profile', gbp: 'google-business-profile',
+  outlook: 'outlook-mail', outlookmail: 'outlook-mail', outlookcalendar: 'outlook-calendar',
+  onedrive: 'microsoft-onedrive', word: 'microsoft-onedrive', excel: 'microsoft-onedrive', office365: 'microsoft-onedrive', microsoft365: 'microsoft-onedrive', microsoft: 'microsoft-onedrive',
+  teams: 'microsoft-teams', microsoftteams: 'microsoft-teams', bookings: 'microsoft-bookings',
+  twitter: 'twitter-x', x: 'twitter-x', calcom: 'cal-com', kit: 'convertkit',
+};
 // best-effort app-name -> connector-id (NOT the full mapping pass; loose name/id match).
 function resolveConnector(app, connById, all) {
   const norm = String(app || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   if (!norm) return '';
   if (connById(norm)) return norm;
+  if (ALIAS[norm] && connById(ALIAS[norm])) return ALIAS[norm];
   for (const m of all || []) {
     const idn = String(m.id).toLowerCase().replace(/[^a-z0-9]/g, '');
     const nmn = String(m.name).toLowerCase().replace(/[^a-z0-9]/g, '');
