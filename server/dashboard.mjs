@@ -123,6 +123,8 @@ const PROVIDER_LOGIN = {
       const code = (c.match(/\b[A-Z0-9]{4,}-[A-Z0-9]{4,}\b/) || [])[0] || (c.match(/code[^A-Za-z0-9]{0,4}([A-Z0-9][A-Z0-9-]{4,})/i) || [])[1] || '';
       return { url, code };
     },
+    // completion is detected from this marker in the log, not the (fragile) child exit
+    success: /successfully logged in/i,
   },
 };
 // Anthropic does not allow Claude subscription plans to be used by third-party tools.
@@ -1202,6 +1204,21 @@ function providersPage() {
 // Connect one provider: OAuth (spawned device flow, you just approve) or paste a key.
 function providerConnectPage(prov, opts) {
   opts = opts || {};
+  // Detect a finished OAuth sign-in from the CLI's success marker in its log, checked on
+  // every poll - robust to the spawned child's exit being missed (e.g. a dashboard restart
+  // mid-flow). This is what reliably flips "pending" to "connected".
+  {
+    const sp = PROVIDER_LOGIN[prov];
+    if (sp && sp.success) {
+      try {
+        const stc = connectStatus(prov);
+        if (stc && stc.state === 'pending' && sp.success.test(stripAnsi(readFileSync(connectLog(prov), 'utf8')))) {
+          setProviderConnected(prov, true);
+          writeFileSync(connectStatusFile(prov), JSON.stringify({ state: 'connected', at: nowISO() }));
+        }
+      } catch {}
+    }
+  }
   const ps = providerStatus();
   const on = !!ps[prov];
   const st = connectStatus(prov);
