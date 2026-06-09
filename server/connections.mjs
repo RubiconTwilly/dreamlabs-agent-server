@@ -7,6 +7,7 @@
 // dashboard's exact chrome + theme.
 import { CONNECTORS, byId } from './connectors/registry.mjs';
 import { status as connStatus, defaultScopeKeys, selectedScopes } from './connectors/engine.mjs';
+import { nativeBadges } from './composio.mjs';
 
 // Brand-logo tile (Claude-connectors look): real logo on a dark tinted square,
 // graceful emoji fallback if the logo fails to load (or there is no slug).
@@ -38,18 +39,23 @@ export function connectionsPage(ui) {
   // group by category, connected first within each
   const cats = [];
   for (const m of CONNECTORS) { if (!cats.includes(m.category)) cats.push(m.category); }
+  const via = nativeBadges();   // { nativeId: {accounts, toolkits} } connected through the customer's Composio account
   const st = {}; let connectedCount = 0;
-  for (const m of CONNECTORS) { const s = connStatus(m); st[m.id] = s; if (s.connected) connectedCount++; }
+  for (const m of CONNECTORS) { st[m.id] = connStatus(m); if (st[m.id].connected || via[m.id]) connectedCount++; }
+  const connOf = (m) => st[m.id].connected || !!via[m.id];
 
   const sections = cats.map(cat => {
-    const items = CONNECTORS.filter(m => m.category === cat).sort((a, b) => (st[b.id].connected - st[a.id].connected) || a.name.localeCompare(b.name));
+    const items = CONNECTORS.filter(m => m.category === cat).sort((a, b) => ((connOf(b) ? 1 : 0) - (connOf(a) ? 1 : 0)) || a.name.localeCompare(b.name));
     const cards = items.map(m => {
       const s = st[m.id];
+      const vc = via[m.id];
       const right = m.auth === 'none'
         ? '<span class="pill">soon</span>'
         : (s.connected
           ? `<span class="pill live"><span class="dotmark"></span>connected</span>`
-          : authBadge(m));
+          : (vc
+            ? `<span class="pill live" title="Connected through your Composio account"><span class="dotmark"></span>via Composio${vc.accounts > 1 ? ' · ' + vc.accounts + ' accts' : ''}</span>`
+            : authBadge(m)));
       return `<a class="conn-card" href="/connection/${esc(m.id)}" data-name="${esc(m.name.toLowerCase())}" data-cat="${esc(cat.toLowerCase())}">
         ${logoTile(esc, m)}
         <span class="conn-meta"><span class="conn-name">${esc(m.name)}</span><span class="conn-sub">${right}</span></span></a>`;

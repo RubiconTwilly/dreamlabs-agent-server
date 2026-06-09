@@ -22,6 +22,7 @@ import { homedir } from 'node:os';
 import { CONNECTORS, byId as connById } from './connectors/registry.mjs';
 import * as engine from './connectors/engine.mjs';
 import { connectionsPage, connectorPage, connectorCallbackResultPage } from './connections.mjs';
+import * as composio from './composio.mjs';
 import * as dl from './dl-backend.mjs';
 
 const DATA = process.env.DL_DATA || '/var/dreamlabs';
@@ -979,10 +980,69 @@ function formPage(r, prefill) {
           <span class="tg-ic">&lt;/&gt;</span><div><div class="tg-t">API</div><div class="tg-s">Trigger from your own code by sending a POST request</div></div></label>
       </div>
       <div class="trig-config" id="tc-schedule" style="display:none">
-        <label class="field" style="margin-top:12px"><span class="lab">Cron expression</span>
-          <span class="hint">Any interval - sub-hourly is the whole point of self-hosting. <code>*/15 * * * *</code> = every 15 min. Runs in the <b>server timezone: ${esc(SERVER_TZ)}</b> (server clock now ${esc(serverNow())}). On a cloud VPS this is often UTC - set the box timezone if you want local times.</span>
-          <input name="cron" value="${esc(t.cron || '0 9 * * *')}" placeholder="0 9 * * *"></label>
+        <label class="field" style="margin-top:12px"><span class="lab">When should it run?</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:2px">
+            <select id="schedFreq" style="width:auto;min-width:160px">
+              <option value="*/15 * * * *">Every 15 minutes</option>
+              <option value="*/30 * * * *">Every 30 minutes</option>
+              <option value="0 * * * *">Every hour</option>
+              <option value="0 */3 * * *">Every 3 hours</option>
+              <option value="0 */6 * * *">Every 6 hours</option>
+              <option value="daily">Every day</option>
+              <option value="weekdays">Weekdays (Mon-Fri)</option>
+              <option value="weekly">Every week</option>
+              <option value="custom">Custom cron...</option>
+            </select>
+            <span id="schedAtWrap" style="display:none;align-items:center;gap:6px">at <input id="schedTime" type="time" value="09:00" style="width:auto"></span>
+            <select id="schedDow" style="display:none;width:auto">
+              <option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option>
+            </select>
+          </div>
+          <div id="schedCustomWrap" style="display:none;margin-top:8px"><input id="schedCron" placeholder="*/15 * * * *" autocomplete="off"></div>
+          <input type="hidden" name="cron" id="schedHidden" value="${esc(t.cron || '0 9 * * *')}">
+          <span class="hint" id="schedSummary" style="margin-top:8px"></span></label>
       </div>
+      <script>(function(){
+        var TZ=${JSON.stringify(SERVER_TZ)};
+        var freq=document.getElementById('schedFreq'),atW=document.getElementById('schedAtWrap'),time=document.getElementById('schedTime'),dow=document.getElementById('schedDow'),cw=document.getElementById('schedCustomWrap'),cron=document.getElementById('schedCron'),hidden=document.getElementById('schedHidden'),sum=document.getElementById('schedSummary');
+        if(!freq) return;
+        function pad(n){return (n<10?'0':'')+n;}
+        function humanize(c){
+          var m={'*/15 * * * *':'every 15 minutes','*/30 * * * *':'every 30 minutes','0 * * * *':'every hour','0 */3 * * *':'every 3 hours','0 */6 * * *':'every 6 hours'};
+          if(m[c]) return m[c];
+          var p=c.split(/\s+/);
+          if(p.length===5 && /^[0-9]+$/.test(p[0]) && /^[0-9]+$/.test(p[1])){
+            var hh=+p[1],mm=+p[0],ap=hh<12?'AM':'PM',h12=((hh+11)%12)+1,at=h12+':'+pad(mm)+' '+ap;
+            if(p[4]==='1-5') return 'weekdays at '+at;
+            if(/^[0-6]$/.test(p[4])){var dn=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];return dn[+p[4]]+'s at '+at;}
+            if(p[4]==='*') return 'daily at '+at;
+          }
+          return 'on this cron: '+c;
+        }
+        function build(){
+          var f=freq.value,c='';
+          atW.style.display=(f==='daily'||f==='weekdays'||f==='weekly')?'inline-flex':'none';
+          dow.style.display=(f==='weekly')?'inline-block':'none';
+          cw.style.display=(f==='custom')?'block':'none';
+          if(f==='custom'){c=(cron.value||'').trim();}
+          else if(f==='daily'||f==='weekdays'||f==='weekly'){
+            var t=(time.value||'09:00').split(':'),hh=parseInt(t[0]||'9',10),mm=parseInt(t[1]||'0',10);
+            var d=(f==='weekdays')?'1-5':((f==='weekly')?dow.value:'*');
+            c=mm+' '+hh+' * * '+d;
+          } else {c=f;}
+          hidden.value=c;
+          sum.innerHTML=c?('Runs '+humanize(c)+' ('+TZ+' time).'):'Pick a schedule.';
+        }
+        (function init(){
+          var c=(hidden.value||'').trim(),known=['*/15 * * * *','*/30 * * * *','0 * * * *','0 */3 * * *','0 */6 * * *'];
+          if(known.indexOf(c)>=0){freq.value=c;}
+          else{var p=c.split(/\s+/);
+            if(p.length===5 && /^[0-9]+$/.test(p[0]) && /^[0-9]+$/.test(p[1])){time.value=pad(+p[1])+':'+pad(+p[0]);if(p[4]==='1-5')freq.value='weekdays';else if(/^[0-6]$/.test(p[4])){freq.value='weekly';dow.value=p[4];}else freq.value='daily';}
+            else{freq.value='custom';cron.value=c;}}
+          build();
+        })();
+        freq.addEventListener('change',build);time.addEventListener('change',build);dow.addEventListener('change',build);cron.addEventListener('input',build);
+      })();</script>
       <div class="trig-config" id="tc-api" style="display:none"><p class="contract-note" style="margin-top:12px">Trigger with <code>POST ${esc(PUBLIC_URL || '<dashboard-url>')}/api/trigger/&lt;id&gt;</code> and header <code>Authorization: Bearer &lt;token&gt;</code> (your access key).</p></div>
       <div class="trig-config" id="tc-webhook" style="display:none"><p class="contract-note" style="margin-top:12px">Point a GitHub webhook at <code>POST ${esc(PUBLIC_URL || '<dashboard-url>')}/webhook/&lt;id&gt;</code>. Set <code>WEBHOOK_SECRET</code> in secrets.env to verify signatures.</p></div>
     </div>
@@ -1587,10 +1647,13 @@ const server = http.createServer(async (req, res) => {
         } else if (m.auth === 'apikey') {
           const input = {}; for (const fl of (m.fields || [])) input[fl.name] = f[fl.name];
           engine.saveCreds(m, input);
+          // Composio is a connection backend: pull the customer's connected apps so the
+          // directory lights up matching tiles "via Composio". Fire-and-forget (slow-ish).
+          if (cid === 'composio' && input.api_key) composio.refresh(input.api_key).catch(() => {});
         }
         return redirect(res, '/connection/' + cid);
       }
-      if (m && action === 'disconnect') { await engine.disconnect(m); return redirect(res, '/connection/' + cid); }
+      if (m && action === 'disconnect') { await engine.disconnect(m); if (cid === 'composio') composio.clearCache(); return redirect(res, '/connection/' + cid); }
     }
     if (path === '/routine') {
       const data = readRoutines();

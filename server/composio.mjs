@@ -9,6 +9,12 @@
 // No REST key needed: connect.composio.dev/mcp authenticates with x-consumer-api-key.
 // CLI:  node composio.mjs connections <apiKey> <toolkit,toolkit,...>
 
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { byId } from './connectors/registry.mjs';
+
+const DATA = process.env.DL_DATA || '/var/dreamlabs';
+const CACHE = join(DATA, 'composio-apps.json');
 const MCP_URL = process.env.COMPOSIO_MCP_URL || 'https://connect.composio.dev/mcp';
 let _id = 0;
 
@@ -62,17 +68,63 @@ export async function listConnections(apiKey, toolkits) {
   return out;
 }
 
+// ---- connection-backend helpers: cache the customer's connected apps + map to tiles ----
+
+// Common Composio toolkit slugs to probe; the connected ones light up matching tiles.
+const CANDIDATE_TOOLKITS = [
+  'gmail', 'googlesheets', 'googledocs', 'googledrive', 'googlecalendar', 'youtube', 'google_analytics',
+  'stripe', 'shopify', 'paypal', 'quickbooks', 'xero',
+  'slack', 'discord', 'telegram',
+  'notion', 'airtable', 'clickup', 'asana', 'trello', 'linear', 'jira',
+  'hubspot', 'salesforce', 'pipedrive', 'active_campaign', 'mailchimp', 'klaviyo', 'sendgrid', 'intercom',
+  'github', 'gitlab', 'sentry',
+  'calendly', 'zoom', 'typeform', 'webflow', 'wordpress',
+];
+
+const GOOGLE_SUB = new Set(['gmail', 'googlesheets', 'googledocs', 'googledrive', 'googlecalendar', 'youtube', 'google_analytics', 'googleanalytics']);
+function toNativeId(toolkit) {
+  if (GOOGLE_SUB.has(toolkit)) return byId('google') ? 'google' : null;
+  for (const v of [toolkit, toolkit.replace(/_/g, ''), toolkit.replace(/_/g, '-')]) if (byId(v)) return v;
+  return null; // not in the native directory (a catalog-expansion candidate)
+}
+
+// Fetch the customer's connected apps and cache them. Call on connect; async + slow-ish.
+export async function refresh(apiKey) {
+  const all = await listConnections(apiKey, CANDIDATE_TOOLKITS);
+  const apps = {};
+  for (const [tk, v] of Object.entries(all)) if (v.connected) apps[tk] = { accounts: v.accounts };
+  try { mkdirSync(DATA, { recursive: true }); writeFileSync(CACHE, JSON.stringify({ at: Date.now(), apps }), { mode: 0o600 }); } catch {}
+  return apps;
+}
+export function cached() { try { return JSON.parse(readFileSync(CACHE, 'utf8')).apps || {}; } catch { return {}; } }
+export function clearCache() { try { writeFileSync(CACHE, JSON.stringify({ at: Date.now(), apps: {} }), { mode: 0o600 }); } catch {} }
+
+// { nativeId: { accounts, toolkits[] } } so the directory can badge tiles "via Composio".
+export function nativeBadges() {
+  const apps = cached(); const out = {};
+  for (const [tk, v] of Object.entries(apps)) {
+    const nid = toNativeId(tk); if (!nid) continue;
+    if (!out[nid]) out[nid] = { accounts: 0, toolkits: [] };
+    out[nid].accounts += (v.accounts || 0); out[nid].toolkits.push(tk);
+  }
+  return out;
+}
+
 // CLI
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [, , cmd, apiKey, toolkitsCsv] = process.argv;
   if (cmd === 'connections' && apiKey) {
-    const toolkits = (toolkitsCsv || 'gmail,googlesheets,googledocs,youtube,stripe,active_campaign,slack,notion,github,hubspot')
+    const toolkits = (toolkitsCsv || CANDIDATE_TOOLKITS.join(','))
       .split(',').map(s => s.trim()).filter(Boolean);
     listConnections(apiKey, toolkits)
       .then(r => { console.log(JSON.stringify(r, null, 2)); })
       .catch(e => { console.error(String(e.message || e)); process.exit(1); });
+  } else if (cmd === 'refresh' && apiKey) {
+    refresh(apiKey)
+      .then(r => console.log('cached ' + Object.keys(r).length + ' connected apps: ' + JSON.stringify(r)))
+      .catch(e => { console.error(String(e.message || e)); process.exit(1); });
   } else {
-    console.error('usage: node composio.mjs connections <apiKey> <toolkit,toolkit,...>');
+    console.error('usage: node composio.mjs <connections|refresh> <apiKey> [toolkit,...]');
     process.exit(2);
   }
 }
