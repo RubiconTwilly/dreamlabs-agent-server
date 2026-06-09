@@ -120,7 +120,7 @@ const PROVIDER_LOGIN = {
     parse: (raw) => {
       const c = stripAnsi(raw);
       const url = (c.match(/https?:\/\/[^\s'"]+/) || [])[0] || '';
-      const code = (c.match(/\b[A-Z0-9]{4,}-[A-Z0-9]{4,}\b/) || c.match(/code[^A-Za-z0-9]{0,4}([A-Z0-9][A-Z0-9-]{4,})/i) || [])[1] || '';
+      const code = (c.match(/\b[A-Z0-9]{4,}-[A-Z0-9]{4,}\b/) || [])[0] || (c.match(/code[^A-Za-z0-9]{0,4}([A-Z0-9][A-Z0-9-]{4,})/i) || [])[1] || '';
       return { url, code };
     },
   },
