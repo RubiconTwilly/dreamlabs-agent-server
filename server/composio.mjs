@@ -22,10 +22,11 @@ async function send(apiKey, body, session) {
   const res = await fetch(MCP_URL, { method: 'POST', headers, body: JSON.stringify(body) });
   const sid = res.headers.get('mcp-session-id') || session;
   const raw = await res.text();
-  const matches = [...raw.matchAll(/data: (\{.*\})/g)];
-  let data = null;
-  if (matches.length) { try { data = JSON.parse(matches[matches.length - 1][1]); } catch {} }
-  else if (raw.trim().startsWith('{')) { try { data = JSON.parse(raw); } catch {} }
+  const objs = [];
+  for (const mm of raw.matchAll(/data: (\{.*\})/g)) { try { objs.push(JSON.parse(mm[1])); } catch {} }
+  if (!objs.length && raw.trim().startsWith('{')) { try { objs.push(JSON.parse(raw)); } catch {} }
+  // Pick the actual JSON-RPC response (has result/error), not a stray SSE event.
+  const data = objs.find(o => o && (o.result || o.error)) || objs[objs.length - 1] || null;
   return { sid, data };
 }
 
@@ -47,8 +48,8 @@ export async function listConnections(apiKey, toolkits) {
   if (!apiKey) throw new Error('composio: no api key');
   const session = await open(apiKey);
   const out = {};
-  for (let i = 0; i < toolkits.length; i += 8) {
-    const batch = toolkits.slice(i, i + 8);
+  for (let i = 0; i < toolkits.length; i += 6) {
+    const batch = toolkits.slice(i, i + 6);
     // Bare toolkit slugs are the reliable, side-effect-free probe. (Do NOT use
     // COMPOSIO_MANAGE_CONNECTIONS to read status: it *initiates* new connections.)
     const rpc = await send(apiKey, { jsonrpc: '2.0', id: ++_id, method: 'tools/call',
