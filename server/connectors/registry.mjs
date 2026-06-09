@@ -77,6 +77,28 @@ const CURATED = [
     ],
     confidence: 'high', sources: ['https://developers.google.com/identity/protocols/oauth2'],
   },
+  {
+    id: 'composio', name: 'Composio', tagline: 'One key, 1000+ app tools via your own Composio account (managed auth, multi-account)', category: 'Site & dev / infra',
+    icon: '🧩', color: '#5B5BD6', brandSlug: 'composio', provider: 'self', auth: 'apikey',
+    fields: [{ name: 'api_key', label: 'Composio API key', secret: true, placeholder: 'ck_...' }],
+    inject: [{ env: 'COMPOSIO_API_KEY', source: 'field.api_key' }],
+    // Composio is special: besides injecting the key, the runner wires an MCP server
+    // into the agent at run time (it reads this `mcp` block). The key is a MASTER
+    // credential for EVERY app the customer connected in Composio, so a routine that
+    // ticks Composio must run egress-locked to the MCP host (see AUDIT.md / $6k rules).
+    mcp: { url: 'https://connect.composio.dev/mcp', header: 'x-consumer-api-key', keyEnv: 'COMPOSIO_API_KEY', egress: ['connect.composio.dev', 'backend.composio.dev'] },
+    apiBase: 'https://connect.composio.dev/mcp', authHeader: 'x-consumer-api-key: <api_key>',
+    agentUsage: 'MCP server https://connect.composio.dev/mcp (header x-consumer-api-key: $COMPOSIO_API_KEY). Meta-tools COMPOSIO_SEARCH_TOOLS + COMPOSIO_MULTI_EXECUTE_TOOL reach every app and account you connected in Composio.',
+    appSetupNotes: 'Create a free Composio account, connect your apps once with managed OAuth (no per-app OAuth app to register; multiple accounts per app supported), then paste your API key. This runs ALONGSIDE your native connectors, it does not replace them.',
+    docsUrl: 'https://docs.composio.dev',
+    guide: [
+      'Sign up at composio.dev (free tier: 20,000 tool calls/month).',
+      'In Composio, connect the apps your agents should use (Gmail, Stripe, Google Sheets, ActiveCampaign, ...). Each is one click; Composio runs the OAuth and you register nothing. Connect as many accounts per app as you like.',
+      'Open Settings / Developers, then API Keys, and copy your key (starts with ck_).',
+      'Paste it below and Save. Any routine that ticks Composio can now use every app and account you connected.',
+    ],
+    confidence: 'high', sources: ['https://docs.composio.dev'],
+  },
 ];
 
 // Curated entries win over any generated one with the same id.

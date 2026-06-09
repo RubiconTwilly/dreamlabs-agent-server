@@ -48,6 +48,8 @@ case "$PROV" in
     add CLAUDE_CODE_OAUTH_TOKEN "${DL_TOKEN_claude:-${CLAUDE_CODE_OAUTH_TOKEN:-}}"
     CMD=(claude -p "$INSTR" --output-format text --dangerously-skip-permissions)
     [ -n "$MODEL" ] && CMD+=(--model "$MODEL")
+    # Composio (or any future) MCP server wired for this run by the runner.
+    [ -f "$WS/.dl-composio-mcp.json" ] && CMD+=(--mcp-config "$WS/.dl-composio-mcp.json")
     ;;
   codex)
     add OPENAI_API_KEY "${DL_KEY_codex:-${OPENAI_API_KEY:-}}"

@@ -217,6 +217,24 @@ for cid in $CONNECTORS_LIST; do
 done
 export DL_CONNECTOR_VARS
 
+# ---------- Composio MCP (optional, reversible, gated on the connector) ----------
+# If this routine ticked Composio, drop a per-run MCP config so the agent reaches
+# every app + account the customer connected in their Composio account. The key is
+# referenced by NAME (COMPOSIO_API_KEY, injected above), never written into the file.
+# SECURITY: the Composio key is a MASTER credential; a routine using it should run
+# egress-locked to connect.composio.dev before it handles any untrusted input.
+rm -f "$WORKSPACE/.dl-composio-mcp.json" 2>/dev/null || true
+case " $CONNECTORS_LIST " in
+  *" composio "*)
+    if [ -n "${COMPOSIO_API_KEY:-}" ]; then
+      printf '%s\n' '{ "mcpServers": { "composio": { "type": "http", "url": "https://connect.composio.dev/mcp", "headers": { "x-consumer-api-key": "${COMPOSIO_API_KEY}" } } } }' > "$WORKSPACE/.dl-composio-mcp.json"
+      echo "--- composio: MCP server wired for this run (apps + accounts from your Composio account) ---" >> "$LOG"
+    else
+      echo "--- composio: ticked but not connected (paste your Composio API key in the dashboard) ---" >> "$LOG"
+    fi
+    ;;
+esac
+
 START_S=$SECONDS
 set +e
 run_with_timeout "$TIMEOUT_SECS" \
